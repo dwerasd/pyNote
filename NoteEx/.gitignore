@@ -1,0 +1,15 @@
+# MSBuild 산출물 - 솔루션 공용 OutDir/IntDir(x64\ReleaseMD, x64\temp)
+x64/
+Win32/
+
+# Visual Studio 로컬 상태
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.aps
+
+# 실행 시 생성물
+NoteEx.ini
+log-NoteEx/

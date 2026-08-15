@@ -1,0 +1,39 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11109.219
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NoteEx", "NoteEx\NoteEx.vcxproj", "{1D9C08F1-3C8C-4E12-B0AF-33D5BDD259DB}"
+	ProjectSection(ProjectDependencies) = postProject
+		{2336E1D5-F5BE-4898-ABE6-33197746CB8C} = {2336E1D5-F5BE-4898-ABE6-33197746CB8C}
+		{53025C18-5593-4415-B919-DF53BEA5ED5C} = {53025C18-5593-4415-B919-DF53BEA5ED5C}
+		{21F8FAA0-FC66-4468-AA31-B10B3B7B789F} = {21F8FAA0-FC66-4468-AA31-B10B3B7B789F}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DarkCore", "..\..\..\..\_Library\DarkCore\DarkCore.vcxproj", "{2336E1D5-F5BE-4898-ABE6-33197746CB8C}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D2DWrapp", "..\..\..\..\_Library\D2DWrapp\D2DWrapp.vcxproj", "{53025C18-5593-4415-B919-DF53BEA5ED5C}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DOpenSources", "..\..\..\..\_Library\DOpenSources\DOpenSources.vcxproj", "{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		ReleaseMD|x64 = ReleaseMD|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1D9C08F1-3C8C-4E12-B0AF-33D5BDD259DB}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{1D9C08F1-3C8C-4E12-B0AF-33D5BDD259DB}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{2336E1D5-F5BE-4898-ABE6-33197746CB8C}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{2336E1D5-F5BE-4898-ABE6-33197746CB8C}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{53025C18-5593-4415-B919-DF53BEA5ED5C}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{53025C18-5593-4415-B919-DF53BEA5ED5C}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3A07E5D1-E1E8-452C-AD80-3E8A6AA99AD8}
+	EndGlobalSection
+EndGlobal
