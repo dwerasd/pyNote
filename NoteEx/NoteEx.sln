@@ -16,6 +16,13 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D2DWrapp", "..\..\..\..\_Li
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DOpenSources", "..\..\..\..\_Library\DOpenSources\DOpenSources.vcxproj", "{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NoteExCore", "core\NoteExCore.vcxproj", "{FA504A92-C5A7-42FA-A7EA-562097E0E78F}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NoteExTests", "tests\NoteExTests.vcxproj", "{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}"
+	ProjectSection(ProjectDependencies) = postProject
+		{FA504A92-C5A7-42FA-A7EA-562097E0E78F} = {FA504A92-C5A7-42FA-A7EA-562097E0E78F}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		ReleaseMD|x64 = ReleaseMD|x64
@@ -29,6 +36,10 @@ Global
 		{53025C18-5593-4415-B919-DF53BEA5ED5C}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
 		{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
 		{21F8FAA0-FC66-4468-AA31-B10B3B7B789F}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{FA504A92-C5A7-42FA-A7EA-562097E0E78F}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{FA504A92-C5A7-42FA-A7EA-562097E0E78F}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

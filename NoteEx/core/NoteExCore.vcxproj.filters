@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="텍스트">
+      <UniqueIdentifier>{76849084-e90d-4e38-a6be-faec880eaf96}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\pynote\core\text\utf16_offset.h">
+      <Filter>텍스트</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\text\utf16_offset.cpp">
+      <Filter>텍스트</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

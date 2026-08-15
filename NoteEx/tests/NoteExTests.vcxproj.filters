@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="단위 시험">
+      <UniqueIdentifier>{adc555dd-0edb-4ff7-8571-670519f14f37}</UniqueIdentifier>
+      <Extensions>cpp</Extensions>
+    </Filter>
+    <Filter Include="하네스">
+      <UniqueIdentifier>{83d9bbe5-8f8b-4877-8c57-7e5bbe702841}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{5a35ea12-04ec-4fef-b2fd-c33ee9450196}</UniqueIdentifier>
+      <Extensions>cpp;hpp</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="harness\include\pynote\harness\win32_harness.h">
+      <Filter>하네스</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="unit\utf16_offset_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\win32_harness.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\harness_smoke_test.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
+      <Filter>third_party</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
