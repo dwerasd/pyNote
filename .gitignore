@@ -1,0 +1,26 @@
+# 가상환경
+.venv/
+.venv-*/
+.venv.*/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# 빌드 산출물 (build.bat / PyInstaller)
+# build.bat 은 --distpath . 로 저장소 루트에 exe 를 만든다(dist/ 는 구 경로).
+/pyNote.exe
+build/
+dist/
+*.spec
+
+# 단일 인스턴스 잠금 파일 — QLockFile 이 상대경로라 실행 시 작업 디렉터리에 생긴다
+pynote-*.lock
+
+# 로컬 사용자 데이터 (개발 중 실수 유입 방지)
+*.sqlite3
+*.db
+docs/
+scratchpad/

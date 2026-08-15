@@ -1,0 +1,5 @@
+# 개행 정책 — 저장소에는 LF 로 정규화하고 체크아웃 시 플랫폼 기본 개행을 쓴다.
+* text=auto
+
+# build.bat 은 cmd.exe 가 CRLF 를 요구한다 — LF 로 체크아웃되면 파싱에 실패한다.
+build.bat text eol=crlf

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pynote"
+version = "0.1.0"
+description = "여러 줄 카드 기반 로컬 노트 애플리케이션"
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6==6.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "pyright==1.1.411",
+    "pytest==8.4.1",
+    "pytest-qt==4.5.0",
+    "ruff==0.12.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pynote"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.pyright]
+include = ["src", "tests", "main.py"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+# uv sync 가 만드는 프로젝트 가상환경에서 패키지를 해석한다.
+venvPath = "."
+venv = ".venv"
