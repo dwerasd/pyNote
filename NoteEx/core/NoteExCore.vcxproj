@@ -56,9 +56,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\pynote\core\text\utf16_offset.h" />
+    <ClInclude Include="include\pynote\core\storage\database.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\text\utf16_offset.cpp" />
+    <ClCompile Include="src\storage\database.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

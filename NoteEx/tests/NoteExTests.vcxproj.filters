@@ -23,6 +23,9 @@
     <ClCompile Include="unit\utf16_offset_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\database_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="harness\src\win32_harness.cpp">
       <Filter>하네스</Filter>
     </ClCompile>

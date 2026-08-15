@@ -21,7 +21,10 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NoteExTests", "tests\NoteExTests.vcxproj", "{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}"
 	ProjectSection(ProjectDependencies) = postProject
 		{FA504A92-C5A7-42FA-A7EA-562097E0E78F} = {FA504A92-C5A7-42FA-A7EA-562097E0E78F}
+		{42D7CCAB-4C34-4F7B-8C6D-5BCAD1CC972E} = {42D7CCAB-4C34-4F7B-8C6D-5BCAD1CC972E}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sqlite3", "..\..\..\..\_Library\sqlite3\sqlite3.vcxproj", "{42D7CCAB-4C34-4F7B-8C6D-5BCAD1CC972E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -40,6 +43,8 @@ Global
 		{FA504A92-C5A7-42FA-A7EA-562097E0E78F}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
 		{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
 		{8DF797D1-6465-45CA-9B72-F6D55CE4DCAD}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
+		{42D7CCAB-4C34-4F7B-8C6D-5BCAD1CC972E}.ReleaseMD|x64.ActiveCfg = ReleaseMD|x64
+		{42D7CCAB-4C34-4F7B-8C6D-5BCAD1CC972E}.ReleaseMD|x64.Build.0 = ReleaseMD|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

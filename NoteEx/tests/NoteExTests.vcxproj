@@ -73,6 +73,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="unit\utf16_offset_test.cpp" />
+    <ClCompile Include="unit\database_test.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">

@@ -5,15 +5,25 @@
       <UniqueIdentifier>{76849084-e90d-4e38-a6be-faec880eaf96}</UniqueIdentifier>
       <Extensions>h;hpp;cpp</Extensions>
     </Filter>
+    <Filter Include="저장">
+      <UniqueIdentifier>{1e5614fa-1a0c-48b1-a210-0775366678d4}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\pynote\core\text\utf16_offset.h">
       <Filter>텍스트</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\database.h">
+      <Filter>저장</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\text\utf16_offset.cpp">
       <Filter>텍스트</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\database.cpp">
+      <Filter>저장</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
