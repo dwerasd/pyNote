@@ -39,6 +39,12 @@
     <ClInclude Include="include\pynote\core\storage\migrations\registry.h">
       <Filter>저장</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\file_system.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\backup.h">
+      <Filter>저장</Filter>
+    </ClInclude>
     <ClInclude Include="include\pynote\core\storage\migrations\v0001_initial.h">
       <Filter>저장</Filter>
     </ClInclude>
@@ -81,6 +87,9 @@
       <Filter>저장</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\repositories.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\backup.cpp">
       <Filter>저장</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\migration_runner.cpp">

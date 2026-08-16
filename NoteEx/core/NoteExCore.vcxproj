@@ -60,6 +60,8 @@
     <ClInclude Include="include\pynote\core\domain\models.h" />
     <ClInclude Include="src\domain\enum_spelling.h" />
     <ClInclude Include="include\pynote\core\storage\database.h" />
+    <ClInclude Include="include\pynote\core\storage\file_system.h" />
+    <ClInclude Include="include\pynote\core\storage\backup.h" />
     <ClInclude Include="include\pynote\core\storage\repositories.h" />
     <ClInclude Include="include\pynote\core\storage\migration_runner.h" />
     <ClInclude Include="include\pynote\core\storage\migrations\registry.h" />
@@ -79,6 +81,7 @@
     <ClCompile Include="src\domain\models.cpp" />
     <ClCompile Include="src\storage\database.cpp" />
     <ClCompile Include="src\storage\repositories.cpp" />
+    <ClCompile Include="src\storage\backup.cpp" />
     <ClCompile Include="src\storage\migration_runner.cpp" />
     <ClCompile Include="src\storage\migrations\registry.cpp" />
     <ClCompile Include="src\storage\migrations\v0001_initial.cpp" />

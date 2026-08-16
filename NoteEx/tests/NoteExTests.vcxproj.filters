@@ -13,10 +13,20 @@
       <UniqueIdentifier>{5a35ea12-04ec-4fef-b2fd-c33ee9450196}</UniqueIdentifier>
       <Extensions>cpp;hpp</Extensions>
     </Filter>
+    <Filter Include="플랫폼">
+      <UniqueIdentifier>{6b0c8f2a-4f1d-49a7-9a9c-2d3e5f7a1b64}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h">
       <Filter>하네스</Filter>
+    </ClInclude>
+    <ClInclude Include="unit\backup_test_support.h">
+      <Filter>단위 시험</Filter>
+    </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h">
+      <Filter>플랫폼</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -46,6 +56,21 @@
     </ClCompile>
     <ClCompile Include="unit\repositories_cas_test.cpp">
       <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\backup_inspection_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\backup_create_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\backup_restore_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\backup_split_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_file_system.cpp">
+      <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="harness\src\win32_harness.cpp">
       <Filter>하네스</Filter>

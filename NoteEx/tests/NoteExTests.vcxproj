@@ -47,7 +47,7 @@
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <!-- Catch2 는 예외로 실패를 보고한다. -->
       <ExceptionHandling>Sync</ExceptionHandling>
-      <AdditionalIncludeDirectories>$(SolutionDir);D:\_Library;$(MSBuildThisFileDirectory)..\core\include;$(MSBuildThisFileDirectory)harness\include;$(MSBuildThisFileDirectory)..\third_party\catch2;$(SolutionDir);D:\_Library;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);D:\_Library;$(MSBuildThisFileDirectory)..\core\include;$(MSBuildThisFileDirectory)..\platform\include;$(MSBuildThisFileDirectory)harness\include;$(MSBuildThisFileDirectory)..\third_party\catch2;$(SolutionDir);D:\_Library;</AdditionalIncludeDirectories>
       <AdditionalOptions>/Zc:__cplusplus /Zc:threadSafeInit %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>None</DebugInformationFormat>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
@@ -70,6 +70,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h" />
+    <ClInclude Include="unit\backup_test_support.h" />
+    <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="unit\utf16_offset_test.cpp" />
@@ -81,6 +83,13 @@
     <ClCompile Include="unit\domain_types_test.cpp" />
     <ClCompile Include="unit\repositories_test.cpp" />
     <ClCompile Include="unit\repositories_cas_test.cpp" />
+    <ClCompile Include="unit\backup_inspection_test.cpp" />
+    <ClCompile Include="unit\backup_create_test.cpp" />
+    <ClCompile Include="unit\backup_restore_test.cpp" />
+    <ClCompile Include="unit\backup_split_test.cpp" />
+    <!-- platform 계층은 별도 프로젝트가 아니라 소유 경계다. 필요한 프로젝트가 직접 컴파일한다
+         (하네스 소스와 같은 방식). -->
+    <ClCompile Include="..\platform\src\win32_file_system.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
