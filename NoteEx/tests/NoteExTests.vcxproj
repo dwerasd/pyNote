@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="ReleaseMD|x64">
@@ -78,6 +78,9 @@
     <ClCompile Include="unit\migration_v0001_test.cpp" />
     <ClCompile Include="unit\migration_v0002_v0009_test.cpp" />
     <ClCompile Include="unit\migration_parity_emit.cpp" />
+    <ClCompile Include="unit\domain_types_test.cpp" />
+    <ClCompile Include="unit\repositories_test.cpp" />
+    <ClCompile Include="unit\repositories_cas_test.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">

@@ -346,6 +346,44 @@ python tools/gates/make_ladder_fixtures.py --out fixtures/ladder_parity
 
 ---
 
+# 저장소 계층 SQL 축자 이식 게이트
+
+`check_repository_sql_parity.py` 는 `repositories.py` 가 `execute(...)` 로 넘기는 SQL
+문장과 그 C++ 이식본의 `u8R"SQL( ... )SQL"` 리터럴을 바이트로 대조한다. 위 마이그레이션
+게이트와 같은 계약을 저장소 계층에 건 것이다 — 한쪽만 지키면 다음에 SQL 을 손댄 사람이
+어느 쪽이 보호받는지 알 수 없다.
+
+## 마이그레이션 게이트와 다른 두 가지
+
+**순서를 대조하지 않는다.** 마이그레이션은 문장 발행 순서가 그 자체로 계약이지만
+(`create_cards` 의 강제 순서가 그 예다) 저장소의 메서드 배치 순서는 계약이 아니다.
+그래서 **다중집합**을 대조한다 — 같은 문장이 두 번 나오면 양쪽 다 두 번이어야 한다.
+
+**추출 방식이 다르다.** 마이그레이션 게이트는 `migrate()` 를 실제로 실행해 발행을
+기록하지만, 저장소 메서드는 살아 있는 데이터베이스와 인자가 있어야 부를 수 있다.
+그래서 이쪽은 파이썬 AST 에서 `*.execute(<문자열 리터럴>)` 의 첫 인자를 뽑는다.
+리터럴이 아닌 방식으로 조립된 문장은 파이썬 쪽에서 안 잡히지만, 그런 문장이 C++ 에
+있으면 "파이썬 쪽에 없는 문장"으로 크게 실패한다.
+
+`u8` 접두는 여기서도 필수이고 이유도 같다. 정규화도 CRLF -> LF 와 BOM 제거 둘뿐이다.
+
+## 실행
+
+```bash
+python tools/gates/check_repository_sql_parity.py --self-test
+python tools/gates/check_repository_sql_parity.py
+python tools/gates/check_repository_sql_parity.py \
+  --python src/pynote/infrastructure/repositories.py \
+  --cpp NoteEx/core/src/storage/repositories.cpp
+```
+
+종료 코드는 다른 게이트와 같다(0 일치 / 1 불일치 / 2 환경 오류). 자기시험은 정상 1건
+수용과 결함 4종(리터럴 누락, 들여쓰기 변형, `u8` 접두 누락, 잉여 리터럴) 거부에 더해
+**실제 원본에서 문장이 실제로 뽑히는지**까지 본다. 0건 추출이 "전건 일치"로 보고되는
+경로를 닫는 것이다 — 아무것도 비교하지 않은 게이트는 통과가 아니다.
+
+---
+
 # 공용 지원 모듈
 
 `migration_reference.py` 는 게이트가 아니다. 네 게이트가 공유하는 원본 적재와 덤프

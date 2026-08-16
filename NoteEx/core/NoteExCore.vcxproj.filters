@@ -9,10 +9,26 @@
       <UniqueIdentifier>{1e5614fa-1a0c-48b1-a210-0775366678d4}</UniqueIdentifier>
       <Extensions>h;hpp;cpp</Extensions>
     </Filter>
+    <Filter Include="도메인">
+      <UniqueIdentifier>{98555e6d-54d1-48b7-9f06-f0955d284c6b}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\pynote\core\text\utf16_offset.h">
       <Filter>텍스트</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\events.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\models.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\enum_spelling.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\repositories.h">
+      <Filter>저장</Filter>
     </ClInclude>
     <ClInclude Include="include\pynote\core\storage\database.h">
       <Filter>저장</Filter>
@@ -55,7 +71,16 @@
     <ClCompile Include="src\text\utf16_offset.cpp">
       <Filter>텍스트</Filter>
     </ClCompile>
+    <ClCompile Include="src\domain\events.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\models.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\repositories.cpp">
       <Filter>저장</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\migration_runner.cpp">
