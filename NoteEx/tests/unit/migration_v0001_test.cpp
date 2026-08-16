@@ -124,7 +124,10 @@ TEST_CASE("v0001 은 원본 STATEMENTS 가 만드는 스키마 객체를 그대�
 
 	pynote::core::storage::C_MIGRATION_RUNNER runner;
 	runner.SetExistingDatabase(false, temp.Utf8());
-	REQUIRE(runner.Run(db) == pynote::core::storage::E_MIGRATE_RESULT::Ok);
+	// v0001 만 적용한다. 인자 없는 Run 은 LATEST(9) 까지 올리므로 여기 기대값과 어긋난다 -
+	// 이 케이스가 보는 것은 v0001 이 만드는 스키마이지 최종 스키마가 아니다.
+	REQUIRE(runner.Run(db, pynote::core::storage::migrations::Registry().first(1), 1)
+		== pynote::core::storage::E_MIGRATE_RESULT::Ok);
 
 	for (const char* pszName : TABLE_NAMES)
 	{
@@ -174,7 +177,10 @@ TEST_CASE("v0001 은 counters 에 ('capture', 1) 하나만 시드한다", "[core
 
 	pynote::core::storage::C_MIGRATION_RUNNER runner;
 	runner.SetExistingDatabase(false, temp.Utf8());
-	REQUIRE(runner.Run(db) == pynote::core::storage::E_MIGRATE_RESULT::Ok);
+	// v0001 만 적용한다. 인자 없는 Run 은 LATEST(9) 까지 올리므로 여기 기대값과 어긋난다 -
+	// 이 케이스가 보는 것은 v0001 이 만드는 스키마이지 최종 스키마가 아니다.
+	REQUIRE(runner.Run(db, pynote::core::storage::migrations::Registry().first(1), 1)
+		== pynote::core::storage::E_MIGRATE_RESULT::Ok);
 
 	REQUIRE(scalar_int(db, "SELECT COUNT(*) FROM counters") == 1);
 	REQUIRE(scalar_int(db, "SELECT next_value FROM counters WHERE name = 'capture'") == 1);
@@ -191,7 +197,10 @@ TEST_CASE("v0001 은 schema_version 을 (1, 1, epoch 마이크로초) 로 남긴
 
 	pynote::core::storage::C_MIGRATION_RUNNER runner;
 	runner.SetExistingDatabase(false, temp.Utf8());
-	REQUIRE(runner.Run(db) == pynote::core::storage::E_MIGRATE_RESULT::Ok);
+	// v0001 만 적용한다. 인자 없는 Run 은 LATEST(9) 까지 올리므로 여기 기대값과 어긋난다 -
+	// 이 케이스가 보는 것은 v0001 이 만드는 스키마이지 최종 스키마가 아니다.
+	REQUIRE(runner.Run(db, pynote::core::storage::migrations::Registry().first(1), 1)
+		== pynote::core::storage::E_MIGRATE_RESULT::Ok);
 
 	REQUIRE(scalar_int(db, "SELECT COUNT(*) FROM schema_version") == 1);
 	REQUIRE(scalar_int(db, "SELECT id FROM schema_version") == 1);
@@ -203,16 +212,16 @@ TEST_CASE("v0001 은 schema_version 을 (1, 1, epoch 마이크로초) 로 남긴
 	REQUIRE(nAppliedAtUs < 4102444800000000LL);
 }
 
-// 대응 원본: v0001_initial.py::migrate (:187~196). 이식의 유일한 문서화된 편차 - 바인드
-// 파라미터가 리터럴로 바뀐 자리를 확인한다. 파이썬 시험 트리에 대응 케이스가 없어
-// pytest node ID 는 W0 T4 역보강 대기다.
-TEST_CASE("문서화된 편차: applied_at_us 리터럴은 준 int64 를 그대로 저장한다", "[core][storage][migration]")
+// 대응 원본: v0001_initial.py::migrate (:187~196). 원본이 바인드 파라미터로 넘기는
+// applied_at_us 를 이식도 바인드로 넘긴다(ExecuteBoundInt64). 파이썬 시험 트리에 대응
+// 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
+TEST_CASE("applied_at_us 바인드는 준 int64 를 그대로 저장한다", "[core][storage][migration]")
 {
 	const C_TEMP_DB temp("v0001_applied_literal");
 	pynote::core::storage::C_DATABASE db;
 	REQUIRE(db.Open(temp.Utf8()));
 
-	// 2^53 + 1 은 double 을 거치면 값이 바뀐다. 정수 경로로 그대로 실려야 한다.
+	// 2^53 + 1 은 double 을 거치면 값이 바뀐다. int64 바인드 경로로 그대로 실려야 한다.
 	const std::int64_t nAppliedAtUs = 9007199254740993LL;
 	REQUIRE(pynote::core::storage::migrations::v0001::Migrate(db, nAppliedAtUs));
 

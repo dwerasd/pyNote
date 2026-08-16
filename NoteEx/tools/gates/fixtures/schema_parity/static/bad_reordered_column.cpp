@@ -1,11 +1,26 @@
 // known-bad fixture: 문장 0 의 id 와 label 열 순서가 뒤바뀌었다.
 // 열 순서는 sqlite_master 원문과 INSERT 의미에 모두 영향을 준다.
 
+#include <cstddef>
+
 namespace fixture::bad_reordered_column
 {
+	// 함정 1: 줄 주석 안의 u8R"SQL( 표기는 추출되면 안 된다.
+	/* 함정 2: 블록 주석 안의 u8R"SQL( 표기도 마찬가지다. */
+
+	// 함정 3: 일반 문자열 안의 표기(이스케이프된 따옴표 포함).
+	static const char* const g_szTrap = "u8R\"SQL(문자열은 문장이 아니다)SQL\"";
+
+	// 함정 4: 구분자가 다르면 추출 대상이 아니다.
+	static const char* const g_szNote = u8R"NOTE(
+    CREATE TABLE not_extracted (
+        id TEXT PRIMARY KEY
+    )
+    )NOTE";
+
 	static const char* const g_szStatements[] =
 	{
-		R"SQL(
+		reinterpret_cast<const char*>(u8R"SQL(
     CREATE TABLE fixture_alpha (
         label TEXT NOT NULL,
         id TEXT PRIMARY KEY,
@@ -13,8 +28,8 @@ namespace fixture::bad_reordered_column
             CHECK (kind IN ('alpha', 'beta', 'gamma')),
         created_at_us INTEGER NOT NULL
     )
-    )SQL",
-		R"SQL(
+    )SQL"),
+		reinterpret_cast<const char*>(u8R"SQL(
     CREATE TABLE fixture_beta (
         id TEXT PRIMARY KEY,
         alpha_id TEXT NOT NULL
@@ -28,21 +43,27 @@ namespace fixture::bad_reordered_column
             ),
         body TEXT NOT NULL
     )
-    )SQL",
-		R"SQL(
+    )SQL"),
+		u8R"SQL(
     CREATE TABLE fixture_counters (
         name TEXT PRIMARY KEY,
         next_value INTEGER NOT NULL
     )
     )SQL",
-		R"SQL(
+		u8R"SQL(
     CREATE UNIQUE INDEX fixture_beta_alpha
     ON fixture_beta(alpha_id)
     WHERE state IS NOT NULL
     )SQL",
-		R"SQL(
+		u8R"SQL(
     INSERT INTO fixture_counters(name, next_value)
     VALUES ('fixture', 1)
     )SQL",
 	};
+
+	// 바인드 파라미터를 쓰는 문장도 같은 구분자로 적는다(T-R2 부터 이식 대상이다).
+	static const char* const g_szSeedAlpha = reinterpret_cast<const char*>(u8R"SQL(
+    INSERT INTO fixture_alpha(id, label, kind, created_at_us)
+    VALUES ('seed', 'seed', 'alpha', ?)
+    )SQL");
 }

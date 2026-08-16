@@ -59,6 +59,11 @@ namespace pynote::core::storage
 		m_sLastError = _sMessage;
 	}
 
+	void C_DATABASE::SetLastError(const std::string& _sMessage)
+	{
+		this->set_error_(_sMessage);
+	}
+
 	bool C_DATABASE::verify_pragma_(const std::string& _sPragma, const std::string& _sExpected)
 	{
 		std::string sValue;

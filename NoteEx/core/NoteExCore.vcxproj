@@ -60,6 +60,14 @@
     <ClInclude Include="include\pynote\core\storage\migration_runner.h" />
     <ClInclude Include="include\pynote\core\storage\migrations\registry.h" />
     <ClInclude Include="include\pynote\core\storage\migrations\v0001_initial.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0002_data_policy_settings.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0003_storage_invariants.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0004_workspace_windows.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0005_recency_sort_mode.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0006_editor_split_sizes.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0007_vertical_split_reset.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0008_horizontal_split_reset.h" />
+    <ClInclude Include="include\pynote\core\storage\migrations\v0009_preview_lines_default.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\text\utf16_offset.cpp" />
@@ -67,6 +75,14 @@
     <ClCompile Include="src\storage\migration_runner.cpp" />
     <ClCompile Include="src\storage\migrations\registry.cpp" />
     <ClCompile Include="src\storage\migrations\v0001_initial.cpp" />
+    <ClCompile Include="src\storage\migrations\v0002_data_policy_settings.cpp" />
+    <ClCompile Include="src\storage\migrations\v0003_storage_invariants.cpp" />
+    <ClCompile Include="src\storage\migrations\v0004_workspace_windows.cpp" />
+    <ClCompile Include="src\storage\migrations\v0005_recency_sort_mode.cpp" />
+    <ClCompile Include="src\storage\migrations\v0006_editor_split_sizes.cpp" />
+    <ClCompile Include="src\storage\migrations\v0007_vertical_split_reset.cpp" />
+    <ClCompile Include="src\storage\migrations\v0008_horizontal_split_reset.cpp" />
+    <ClCompile Include="src\storage\migrations\v0009_preview_lines_default.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

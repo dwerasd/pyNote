@@ -26,6 +26,30 @@
     <ClInclude Include="include\pynote\core\storage\migrations\v0001_initial.h">
       <Filter>저장</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0002_data_policy_settings.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0003_storage_invariants.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0004_workspace_windows.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0005_recency_sort_mode.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0006_editor_split_sizes.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0007_vertical_split_reset.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0008_horizontal_split_reset.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0009_preview_lines_default.h">
+      <Filter>저장</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\text\utf16_offset.cpp">
@@ -41,6 +65,30 @@
       <Filter>저장</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\migrations\v0001_initial.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0002_data_policy_settings.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0003_storage_invariants.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0004_workspace_windows.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0005_recency_sort_mode.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0006_editor_split_sizes.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0007_vertical_split_reset.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0008_horizontal_split_reset.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0009_preview_lines_default.cpp">
       <Filter>저장</Filter>
     </ClCompile>
   </ItemGroup>

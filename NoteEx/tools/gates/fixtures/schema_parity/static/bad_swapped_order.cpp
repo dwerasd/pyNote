@@ -1,10 +1,10 @@
-// known-bad fixture: migrate() 가 발행하지 않는 문장이 같은 `SQL` 구분자로 들어갔다.
-// 게이트는 발행 문장 목록과 리터럴 목록을 순서대로 맞추므로 잉여 리터럴은
-// 문장 수 불일치로 드러난다 - 보조 질의에 이 구분자를 쓰면 안 된다.
+// known-bad fixture: 문장 2 와 3 의 순서가 뒤바뀌었다(본문은 전건 동일).
+// 발행 순서는 계약이다 - 인덱스를 대상 테이블보다 먼저 만들면 실행이 깨지고,
+// 내용만 집합으로 비교하는 게이트는 이 결함을 통과시킨다.
 
 #include <cstddef>
 
-namespace fixture::bad_extra_literal
+namespace fixture::bad_swapped_order
 {
 	// 함정 1: 줄 주석 안의 u8R"SQL( 표기는 추출되면 안 된다.
 	/* 함정 2: 블록 주석 안의 u8R"SQL( 표기도 마찬가지다. */
@@ -46,15 +46,15 @@ namespace fixture::bad_extra_literal
     )
     )SQL"),
 		u8R"SQL(
+    CREATE UNIQUE INDEX fixture_beta_alpha
+    ON fixture_beta(alpha_id)
+    WHERE state IS NOT NULL
+    )SQL",
+		u8R"SQL(
     CREATE TABLE fixture_counters (
         name TEXT PRIMARY KEY,
         next_value INTEGER NOT NULL
     )
-    )SQL",
-		u8R"SQL(
-    CREATE UNIQUE INDEX fixture_beta_alpha
-    ON fixture_beta(alpha_id)
-    WHERE state IS NOT NULL
     )SQL",
 		u8R"SQL(
     INSERT INTO fixture_counters(name, next_value)
@@ -67,10 +67,4 @@ namespace fixture::bad_extra_literal
     INSERT INTO fixture_alpha(id, label, kind, created_at_us)
     VALUES ('seed', 'seed', 'alpha', ?)
     )SQL");
-
-	// migrate() 가 발행한 적 없는 문장이다.
-	static const char* const g_szStray = u8R"SQL(
-    SELECT count(*)
-    FROM fixture_counters
-    )SQL";
 }

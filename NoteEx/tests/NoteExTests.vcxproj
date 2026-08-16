@@ -76,6 +76,7 @@
     <ClCompile Include="unit\database_test.cpp" />
     <ClCompile Include="unit\migration_runner_test.cpp" />
     <ClCompile Include="unit\migration_v0001_test.cpp" />
+    <ClCompile Include="unit\migration_v0002_v0009_test.cpp" />
     <ClCompile Include="unit\migration_parity_emit.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />

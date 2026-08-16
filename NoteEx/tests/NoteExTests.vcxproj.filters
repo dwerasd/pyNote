@@ -32,6 +32,9 @@
     <ClCompile Include="unit\migration_v0001_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\migration_v0002_v0009_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\migration_parity_emit.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>

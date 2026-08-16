@@ -49,6 +49,35 @@ namespace
 
 namespace pynote::core::storage
 {
+	bool ExecuteBoundInt64(C_DATABASE& _database, const char* _pszSql, std::int64_t _nValue)
+	{
+		if (!_database.IsOpen())
+		{
+			_database.SetLastError("연결이 열려 있지 않습니다.");
+			return(false);
+		}
+
+		sqlite3_stmt* pStmt = nullptr;
+		if (::sqlite3_prepare_v2(_database.Handle(), _pszSql, -1, &pStmt, nullptr) != SQLITE_OK)
+		{
+			_database.SetLastError(::sqlite3_errmsg(_database.Handle()));
+			return(false);
+		}
+
+		// 원본이 넘기는 파라미터는 항상 하나뿐이라 인덱스는 1 로 고정이다.
+		bool bResult = (::sqlite3_bind_int64(pStmt, 1, _nValue) == SQLITE_OK);
+		if (bResult)
+		{
+			bResult = (::sqlite3_step(pStmt) == SQLITE_DONE);
+		}
+
+		::sqlite3_finalize(pStmt);
+		// 실패 사유는 finalize 뒤에도 연결에 남는다. C_DATABASE::Execute 가 sqlite3_exec 의
+		// 오류를 옮겨 두는 것과 같은 자리에 넣어야 러너의 보고가 두 경로에서 같은 모양이 된다.
+		if (!bResult) { _database.SetLastError(::sqlite3_errmsg(_database.Handle())); }
+		return(bResult);
+	}
+
 	void C_MIGRATION_RUNNER::set_error_(const std::string& _sMessage)
 	{
 		m_sLastError = _sMessage;

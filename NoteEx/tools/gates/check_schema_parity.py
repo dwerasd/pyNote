@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""v0001 스키마 동등성 게이트(파이썬 러너 <-> C++ 러너).
+"""빈 데이터베이스 스키마 동등성 게이트(파이썬 러너 <-> C++ 러너).
 
-파이썬 원본이 만든 v0001 데이터베이스와 C++ 이식본이 만든 데이터베이스를 각각
-`sqlite_master` 로 덤프해 **문자열이 완전히 같은지** 본다. 축자 이식이 지켜졌는지는
-정적 게이트(`check_migration_sql_parity.py`)가 소스 수준에서 보고, 이 게이트는 그
-소스가 실제로 만들어 내는 **결과 스키마**를 본다. 둘은 대체 관계가 아니다 -
-STATEMENTS 의 `INSERT` 는 스키마 객체를 만들지 않아 이 게이트에 보이지 않고,
-문장 앞뒤의 개행·들여쓰기는 SQLite 가 저장 시 버리므로 역시 보이지 않는다.
-그 사각은 정적 게이트가 덮는다.
+파이썬 원본이 빈 파일에서 최신 버전까지 올린 데이터베이스와, C++ 이식본이 같은
+일을 한 데이터베이스를 각각 `sqlite_master` 로 덤프해 **문자열이 완전히 같은지**
+본다. 축자 이식이 지켜졌는지는 정적 게이트(`check_migration_sql_parity.py`)가 소스
+수준에서 보고, 이 게이트는 그 소스가 실제로 만들어 내는 **결과 스키마**를 본다.
+둘은 대체 관계가 아니다 - `INSERT` 는 스키마 객체를 만들지 않아 이 게이트에
+보이지 않고, 문장 앞뒤의 개행·들여쓰기는 SQLite 가 저장 시 버리므로 역시 보이지
+않는다. 그 사각은 정적 게이트가 덮는다.
+
+**사거리 주의**: 이 게이트는 빈 데이터베이스 한 경로만, 그것도 스키마만 본다.
+기존 데이터베이스를 갱신하는 경로와 **행 데이터**는 사다리 게이트
+(`check_migration_ladder_parity.py`)가 본다. 사다리 게이트의 경로 A 가 이 게이트를
+포함하므로, 이쪽은 fixture 없이 빠르게 스키마만 확인하고 싶을 때 쓰는 가벼운
+게이트다.
+
+(T-R2 갱신: `[parity-emit]` 의 계약은 그대로지만 등록 목록이 v9 까지 늘어 이제
+v9 데이터베이스가 나온다. 그래서 파이썬 쪽도 `MIGRATIONS` 전건을 적용한다 -
+v0001 만 적용하던 T-R1 판 그대로 두면 이식이 옳아도 실패한다.)
 
 정규화 규칙(버전 관리되는 계약이므로 여기 적어 둔다):
   * 대상 = `sqlite_master` 의 `type` `name` `tbl_name` `sql` 네 열.
@@ -25,13 +35,12 @@ STATEMENTS 의 `INSERT` 는 스키마 객체를 만들지 않아 이 게이트�
     UNIQUE·PRIMARY KEY·AUTOINCREMENT 선언의 결과라 스키마 정체성의 일부다.
   * 행 데이터는 비교 대상이 아니다. `schema_version.applied_at_us` 처럼 양쪽이
     각자 생성하는 값은 이 게이트의 관심사가 아니며, 자기시험이 서로 다른
-    `applied_at_us` 로도 덤프가 같음을 보여 이를 증명한다.
+    `applied_at_us` 로도 덤프가 같음을 보여 이를 증명한다. 행을 보는 것은 사다리
+    게이트의 몫이다.
 
-파이썬 쪽은 `database.py` 의 연결 수명주기를 그대로 재현한다(`_open` = database.py
-68~82행, 트랜잭션 = 54~66행, 마이그레이션 호출 = 117행). 원본 패키지는 설치 없이
-가져올 수 없으므로(`pynote.infrastructure.migrations` 의존) 연결 절차만 재현하고,
-스키마 자체는 원본 모듈을 경로로 적재해 `migrate` 를 **직접 호출**한다. 이 파일에는
-스키마 SQL 사본이 한 줄도 없다.
+파이썬 쪽은 `database.py` 의 연결 수명주기와 트랜잭션 구조를 그대로 재현하고
+(`migration_reference` 모듈), 스키마는 원본 모듈을 적재해 `migrate` 를 **직접
+호출**한다. 이 파일에는 스키마 SQL 사본이 한 줄도 없다.
 
 C++ 쪽 계약(고정):
   * 환경 변수 `NOTEEX_PARITY_DB` = 만들 데이터베이스의 UTF-8 경로
@@ -41,11 +50,12 @@ C++ 쪽 계약(고정):
 종료 코드:
   0  통과(두 덤프가 완전히 같음)
   1  스키마 발산 검출(또는 자기시험 기대 불일치)
-  2  사용법·환경 오류(실행 파일 없음·비정상 종료·**스키마 객체 0건** 등)
+  2  사용법·환경 오류(실행 파일 없음·**태그 없음**·비정상 종료·**스키마 객체 0건** 등)
 
 스키마 객체 0건을 통과가 아니라 오류로 두는 것은 의도된 선택이다. 빈 데이터베이스
 둘은 언제나 "같으므로", 그것을 통과로 부르면 게이트가 아무것도 증명하지 못한다.
-[parity-emit] 태그가 없는 낡은 실행 파일이 조용히 통과하는 경로가 정확히 이것이다.
+같은 이유로 태그 존재를 먼저 확인한다 - 태그를 모르는 실행 파일은 그 태그를 주면
+아무것도 하지 않고 **종료 코드 0** 을 낸다(2026-08-16 실측).
 """
 
 from __future__ import annotations
@@ -60,33 +70,22 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, NamedTuple, Sequence
+from typing import NamedTuple, Sequence
 
-# 저장소 루트. 이 파일은 <루트>/NoteEx/tools/gates/ 에 있다.
-REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import migration_reference as reference  # noqa: E402
+from migration_reference import SchemaDump, display_path, tail  # noqa: E402
 
 DEFAULT_PYTHON_MIGRATION = (
-    REPO_ROOT / "src" / "pynote" / "infrastructure" / "migrations" / "v0001_initial.py"
+    reference.PYTHON_MIGRATIONS_DIR / "v0001_initial.py"
 )
-DEFAULT_TEST_EXE = REPO_ROOT / "NoteEx" / "x64" / "ReleaseMD" / "NoteExTests.exe"
+DEFAULT_TEST_EXE = reference.DEFAULT_TEST_EXE
 
 # C++ 방출기 계약(SPEC 고정값).
 PARITY_DB_ENV = "NOTEEX_PARITY_DB"
 PARITY_EMIT_TAG = "[parity-emit]"
 EMIT_TIMEOUT_SECONDS = 180.0
-
-# sqlite_master 덤프 질의. rootpage 제외·결정적 정렬은 모듈 docstring 의 계약이다.
-SCHEMA_QUERY = (
-    "SELECT type, name, tbl_name, sql FROM sqlite_master "
-    "ORDER BY type, name, tbl_name"
-)
-
-
-class SchemaDump(NamedTuple):
-    """덤프 결과. objects 는 sqlite_master 행 수다."""
-
-    text: str
-    objects: int
 
 
 class EmitResult(NamedTuple):
@@ -97,48 +96,11 @@ class EmitResult(NamedTuple):
     stderr: str
 
 
-def _display(path: Path) -> str:
-    """경로를 슬래시로 정규화해 셸·로그 어디서나 같은 문자열이 되게 한다."""
-    return str(path).replace("\\", "/")
-
-
-def _escape(text: str) -> str:
-    """표시용 단사 이스케이프. 정규화가 아니다(모듈 docstring 참조)."""
-    return (
-        text.replace("\\", "\\\\")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-    )
-
-
-def load_reference_migrate(path: Path) -> Callable[[sqlite3.Connection, int], None]:
-    """원본 마이그레이션 모듈을 경로로 적재해 `migrate` 를 돌려준다.
-
-    패키지 설치·가상환경에 의존하지 않는다. 원본이 표준 라이브러리만 가져오기
-    때문에 경로 적재로 충분하며, 이 게이트가 스키마 사본을 들지 않는 근거다.
-    """
-    spec = importlib.util.spec_from_file_location("pynote_reference_migration", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"모듈 스펙을 만들 수 없다: {_display(path)}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
-
-    migrate = getattr(module, "migrate", None)
-    if migrate is None or not callable(migrate):
-        raise AttributeError(f"호출 가능한 migrate 가 없다: {_display(path)}")
-    return migrate
-
-
 def load_reference_statements(path: Path) -> tuple[str, ...]:
     """원본 `STATEMENTS` 를 그대로 돌려준다. 자기시험의 교란 대상이다."""
     spec = importlib.util.spec_from_file_location("pynote_reference_statements", path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"모듈 스펙을 만들 수 없다: {_display(path)}")
+        raise ImportError(f"모듈 스펙을 만들 수 없다: {display_path(path)}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     try:
@@ -148,50 +110,8 @@ def load_reference_statements(path: Path) -> tuple[str, ...]:
 
     statements = getattr(module, "STATEMENTS", None)
     if not isinstance(statements, tuple) or not statements:
-        raise AttributeError(f"STATEMENTS 가 없거나 비었다: {_display(path)}")
+        raise AttributeError(f"STATEMENTS 가 없거나 비었다: {display_path(path)}")
     return statements
-
-
-def open_connection(db_path: Path) -> sqlite3.Connection:
-    """database.py `_open`(68~82행)의 연결 수명주기를 그대로 재현한다.
-
-    autocommit(`isolation_level=None`), `foreign_keys` 를 켠 뒤 되읽어 검증,
-    `journal_mode = WAL` 은 반환값으로 검증한다. 검증에 실패하면 연결을 닫고
-    예외를 던지는 것까지 원본과 같다.
-    """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_path, isolation_level=None)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()
-    if foreign_keys is None or foreign_keys[0] != 1:
-        connection.close()
-        raise RuntimeError("SQLite foreign_keys 활성화에 실패했습니다.")
-
-    journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()
-    if journal_mode is None or str(journal_mode[0]).lower() != "wal":
-        connection.close()
-        raise RuntimeError("SQLite WAL 모드 활성화 검증에 실패했습니다.")
-    return connection
-
-
-def build_python_database(
-    db_path: Path,
-    migrate: Callable[[sqlite3.Connection, int], None],
-    applied_at_us: int,
-) -> None:
-    """파이썬 러너로 v0001 데이터베이스를 만든다(database.py 54~66·117행)."""
-    connection = open_connection(db_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            migrate(connection, applied_at_us)
-            connection.commit()
-        except BaseException:
-            connection.rollback()
-            raise
-    finally:
-        connection.close()
 
 
 def build_database_from_statements(
@@ -202,7 +122,7 @@ def build_database_from_statements(
     `schema_version` upsert 는 원본 `migrate` 의 꼬리와 같은 역할이지만, 자기시험은
     스키마 발산 탐지력만 보므로 문장 목록 실행까지만 한다.
     """
-    connection = open_connection(db_path)
+    connection = reference.open_connection(db_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
         try:
@@ -216,32 +136,9 @@ def build_database_from_statements(
         connection.close()
 
 
-def dump_schema(db_path: Path) -> SchemaDump:
-    """sqlite_master 를 결정적 순서로 덤프한다(모듈 docstring 의 정규화 규칙)."""
-    connection = sqlite3.connect(db_path)
-    try:
-        rows = connection.execute(SCHEMA_QUERY).fetchall()
-    finally:
-        connection.close()
-
-    lines: list[str] = []
-    for row_type, name, tbl_name, sql in rows:
-        lines.append(
-            f"### type={_escape(str(row_type))} "
-            f"name={_escape(str(name))} "
-            f"tbl_name={_escape(str(tbl_name))}"
-        )
-        if sql is None:
-            lines.append("sql: <NULL>")
-            continue
-        segments = str(sql).split("\n")
-        lines.append(f"sql: {len(segments)}줄")
-        lines.extend(f"  |{_escape(segment)}" for segment in segments)
-
-    return SchemaDump(text="\n".join(lines) + ("\n" if lines else ""), objects=len(rows))
-
-
-def diff_dumps(left: SchemaDump, right: SchemaDump, left_label: str, right_label: str) -> list[str]:
+def diff_dumps(
+    left: SchemaDump, right: SchemaDump, left_label: str, right_label: str
+) -> list[str]:
     """두 덤프의 통합 diff. 빈 목록이 곧 동등성 증명이다."""
     return [
         line.rstrip("\n")
@@ -253,14 +150,6 @@ def diff_dumps(left: SchemaDump, right: SchemaDump, left_label: str, right_label
             lineterm="",
         )
     ]
-
-
-def _decode(raw: bytes) -> str:
-    """자식 프로세스 출력 해독. 콘솔 로케일이 cp949 인 환경을 함께 받아 준다."""
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return raw.decode("cp949", errors="replace")
 
 
 def emit_cpp_database(exe: Path, db_path: Path, timeout: float) -> EmitResult:
@@ -276,33 +165,16 @@ def emit_cpp_database(exe: Path, db_path: Path, timeout: float) -> EmitResult:
     )
     return EmitResult(
         returncode=completed.returncode,
-        stdout=_decode(completed.stdout),
-        stderr=_decode(completed.stderr),
+        stdout=reference.decode_process_output(completed.stdout),
+        stderr=reference.decode_process_output(completed.stderr),
     )
 
 
-def _tail(text: str, limit: int = 20) -> str:
-    """로그 전문 덤프를 피하고 꼬리만 인용한다."""
-    lines = text.strip().splitlines()
-    if not lines:
-        return "(출력 없음)"
-    shown = lines[-limit:]
-    prefix = "" if len(lines) <= limit else f"(마지막 {limit}줄)\n"
-    return prefix + "\n".join(f"      {line}" for line in shown)
-
-
-def run_check(
-    python_migration: Path, exe: Path, timeout: float = EMIT_TIMEOUT_SECONDS
-) -> int:
+def run_check(exe: Path, timeout: float = EMIT_TIMEOUT_SECONDS) -> int:
     """실제 두 러너의 결과 스키마를 대조한다. 종료 코드를 돌려준다."""
-    if not python_migration.is_file():
-        print(
-            f"오류: 파이썬 원본이 없다 - {_display(python_migration)}", file=sys.stderr
-        )
-        return 2
     if not exe.is_file():
         print(
-            f"오류: 시험 실행 파일이 없다 - {_display(exe)}\n"
+            f"오류: 시험 실행 파일이 없다 - {display_path(exe)}\n"
             "      ReleaseMD 산출물이 필요하다. 이 게이트는 빌드를 수행하지 않는다"
             "(공유 출력 디렉터리를 건드리지 않기 위한 의도된 제약이다).",
             file=sys.stderr,
@@ -312,28 +184,43 @@ def run_check(
     stat = exe.stat()
     # flush 는 로그 순서 보장용이다 - stderr 는 버퍼링되지 않아 이 줄이 뒤로 밀린다.
     print(
-        f"C++ 방출기: {_display(exe)} "
+        f"C++ 방출기: {display_path(exe)} "
         f"({stat.st_size}바이트, "
         f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))})",
         flush=True,
     )
 
     try:
-        migrate = load_reference_migrate(python_migration)
-    except (OSError, SyntaxError, ImportError, AttributeError) as exc:
+        listing = reference.count_matching_tests(exe, PARITY_EMIT_TAG, timeout)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"오류: 태그 조회 실패 - {PARITY_EMIT_TAG}: {exc}", file=sys.stderr)
+        return 2
+    if listing.matched != 1:
         print(
-            f"오류: 파이썬 원본 적재 실패 - {_display(python_migration)}: {exc}",
+            f"오류: 실행 파일이 {PARITY_EMIT_TAG} 태그를 모른다"
+            f"(일치 {listing.matched}건, 기대 1건). 낡은 실행 파일이다 - "
+            "태그를 모르면 종료 코드 0 과 함께 아무것도 하지 않는다.",
             file=sys.stderr,
         )
         return 2
 
+    try:
+        entries = reference.load_registry()
+    except Exception as exc:
+        print(f"오류: 파이썬 원본 적재 실패 - {exc}", file=sys.stderr)
+        return 2
+    latest = reference.latest_version(entries)
+    print(f"  등록 마이그레이션 {len(entries)}건, 최신 버전 {latest}")
+
     with tempfile.TemporaryDirectory(prefix="schema_parity_") as work:
         work_dir = Path(work)
-        python_db = work_dir / "python_v0001.db"
-        cpp_db = work_dir / "cpp_v0001.db"
+        python_db = work_dir / "python_latest.db"
+        cpp_db = work_dir / "cpp_latest.db"
 
         try:
-            build_python_database(python_db, migrate, time.time_ns() // 1_000)
+            reference.build_database(
+                python_db, entries, time.time_ns() // 1_000
+            )
         except (sqlite3.Error, RuntimeError) as exc:
             print(f"오류: 파이썬 러너 실행 실패 - {exc}", file=sys.stderr)
             return 2
@@ -353,11 +240,9 @@ def run_check(
         if emitted.returncode != 0:
             print(
                 f"오류: C++ 방출기 종료 코드 {emitted.returncode} "
-                f"(기대 0). 명령: {_display(exe)} \"{PARITY_EMIT_TAG}\"\n"
-                f"    stdout:\n{_tail(emitted.stdout)}\n"
-                f"    stderr:\n{_tail(emitted.stderr)}\n"
-                f"      [parity-emit] 태그를 가진 시험이 아직 없거나 실행 파일이 "
-                "낡았을 수 있다. 이 게이트는 빌드하지 않는다.",
+                f"(기대 0). 명령: {display_path(exe)} \"{PARITY_EMIT_TAG}\"\n"
+                f"    stdout:\n{tail(emitted.stdout)}\n"
+                f"    stderr:\n{tail(emitted.stderr)}",
                 file=sys.stderr,
             )
             return 2
@@ -365,16 +250,14 @@ def run_check(
         if not cpp_db.is_file():
             print(
                 f"오류: C++ 방출기가 종료 코드 0 을 냈지만 "
-                f"{PARITY_DB_ENV} 경로에 데이터베이스가 없다 - {_display(cpp_db)}\n"
-                f"    stdout:\n{_tail(emitted.stdout)}\n"
-                "      [parity-emit] 태그에 걸리는 시험이 없는 낡은 실행 파일이면 "
-                "이렇게 보인다.",
+                f"{PARITY_DB_ENV} 경로에 데이터베이스가 없다 - {display_path(cpp_db)}\n"
+                f"    stdout:\n{tail(emitted.stdout)}",
                 file=sys.stderr,
             )
             return 2
 
-        python_dump = dump_schema(python_db)
-        cpp_dump = dump_schema(cpp_db)
+        python_dump = reference.dump_schema(python_db)
+        cpp_dump = reference.dump_schema(cpp_db)
 
         if python_dump.objects == 0 or cpp_dump.objects == 0:
             print(
@@ -385,20 +268,30 @@ def run_check(
             )
             return 2
 
-        diff = diff_dumps(python_dump, cpp_dump, "python/v0001", "cpp/v0001")
+        cpp_version = reference.database_version(cpp_db)
+        diff = diff_dumps(python_dump, cpp_dump, f"python/v{latest}", f"cpp/v{cpp_version}")
         if diff:
             for line in diff:
                 print(line, file=sys.stderr)
             print(
                 f"스키마 발산: diff {len(diff)}줄 "
-                f"(파이썬 {python_dump.objects}객체 / C++ {cpp_dump.objects}객체)",
+                f"(파이썬 v{latest} {python_dump.objects}객체 / "
+                f"C++ v{cpp_version} {cpp_dump.objects}객체)",
+                file=sys.stderr,
+            )
+            return 1
+
+        if cpp_version != latest:
+            print(
+                f"오류: 스키마는 같은데 C++ schema version 이 {cpp_version} 이다"
+                f"(기대 {latest}).",
                 file=sys.stderr,
             )
             return 1
 
         print(
             f"스키마 동등: sqlite_master {python_dump.objects}객체 전건 일치 "
-            "(diff 0줄)"
+            f"(v{latest}, diff 0줄)"
         )
         return 0
 
@@ -411,7 +304,7 @@ def _load_perturbations(path: Path) -> Sequence[object]:
     """교란 fixture 를 경로로 적재한다."""
     spec = importlib.util.spec_from_file_location("schema_parity_perturbations", path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"모듈 스펙을 만들 수 없다: {_display(path)}")
+        raise ImportError(f"모듈 스펙을 만들 수 없다: {display_path(path)}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     try:
@@ -421,7 +314,7 @@ def _load_perturbations(path: Path) -> Sequence[object]:
 
     perturbations = getattr(module, "PERTURBATIONS", None)
     if not perturbations:
-        raise AttributeError(f"PERTURBATIONS 가 없거나 비었다: {_display(path)}")
+        raise AttributeError(f"PERTURBATIONS 가 없거나 비었다: {display_path(path)}")
     return perturbations
 
 
@@ -433,19 +326,17 @@ def run_self_test(python_migration: Path) -> int:
     """
     fixture_path = _fixture_dir() / "perturbations.py"
     if not python_migration.is_file():
-        print(
-            f"오류: 파이썬 원본이 없다 - {_display(python_migration)}", file=sys.stderr
-        )
+        print(f"오류: 파이썬 원본이 없다 - {display_path(python_migration)}", file=sys.stderr)
         return 2
     if not fixture_path.is_file():
-        print(f"오류: fixture 없음 - {_display(fixture_path)}", file=sys.stderr)
+        print(f"오류: fixture 없음 - {display_path(fixture_path)}", file=sys.stderr)
         return 2
 
     try:
-        migrate = load_reference_migrate(python_migration)
+        entries = reference.load_registry()
         statements = load_reference_statements(python_migration)
         perturbations = _load_perturbations(fixture_path)
-    except (OSError, SyntaxError, ImportError, AttributeError) as exc:
+    except Exception as exc:
         print(f"오류: 적재 실패 - {exc}", file=sys.stderr)
         return 2
 
@@ -454,18 +345,21 @@ def run_self_test(python_migration: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="schema_parity_selftest_") as work:
         work_dir = Path(work)
 
-        print("[방향 1] known-good 수용 - 같은 스키마, 다른 applied_at_us")
+        print(
+            f"[방향 1] known-good 수용 - 같은 사다리(v1~v{reference.latest_version(entries)}), "
+            "다른 applied_at_us"
+        )
         left_db = work_dir / "good_left.db"
         right_db = work_dir / "good_right.db"
         try:
-            build_python_database(left_db, migrate, 1_700_000_000_000_000)
-            build_python_database(right_db, migrate, 1_900_000_000_999_999)
+            reference.build_database(left_db, entries, 1_700_000_000_000_000)
+            reference.build_database(right_db, entries, 1_900_000_000_999_999)
         except (sqlite3.Error, RuntimeError) as exc:
             print(f"  ERROR 기준 데이터베이스 생성 실패 - {exc}", file=sys.stderr)
             return 2
 
-        left_dump = dump_schema(left_db)
-        right_dump = dump_schema(right_db)
+        left_dump = reference.dump_schema(left_db)
+        right_dump = reference.dump_schema(right_db)
         if left_dump.objects == 0:
             print("  ERROR 기준 덤프의 스키마 객체가 0건이다.", file=sys.stderr)
             return 2
@@ -486,7 +380,7 @@ def run_self_test(python_migration: Path) -> int:
         except sqlite3.Error as exc:
             print(f"  ERROR 기준 문장 실행 실패 - {exc}", file=sys.stderr)
             return 2
-        base_dump = dump_schema(base_db)
+        base_dump = reference.dump_schema(base_db)
 
         print(f"[방향 2] known-bad 거부 - 교란 {len(perturbations)}종")
         for order, perturbation in enumerate(perturbations):
@@ -524,7 +418,7 @@ def run_self_test(python_migration: Path) -> int:
                 failures += 1
                 continue
 
-            mutated_dump = dump_schema(mutated_db)
+            mutated_dump = reference.dump_schema(mutated_db)
             diff = diff_dumps(base_dump, mutated_dump, "python/base", f"python/{name}")
 
             if detected and diff:
@@ -545,9 +439,9 @@ def run_self_test(python_migration: Path) -> int:
 
         print("[방향 3] 스키마 객체 0건 - 통과가 아니라 환경 오류인가")
         empty_db = work_dir / "empty.db"
-        empty_connection = open_connection(empty_db)
+        empty_connection = reference.open_connection(empty_db)
         empty_connection.close()
-        empty_dump = dump_schema(empty_db)
+        empty_dump = reference.dump_schema(empty_db)
         empty_diff = diff_dumps(empty_dump, empty_dump, "empty", "empty")
         if empty_dump.objects == 0 and not empty_diff:
             print(
@@ -572,25 +466,20 @@ def run_self_test(python_migration: Path) -> int:
     return 0
 
 
-def _force_utf8_output() -> None:
-    """콘솔 로케일(Windows 기본 cp949)과 무관하게 UTF-8 로 출력한다."""
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(encoding="utf-8", errors="backslashreplace")
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    _force_utf8_output()
+    reference.force_utf8_output()
     parser = argparse.ArgumentParser(
-        description="v0001 결과 스키마의 파이썬 <-> C++ 동등성 대조",
+        description="빈 데이터베이스 결과 스키마의 파이썬 <-> C++ 동등성 대조",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--python-migration",
         default=str(DEFAULT_PYTHON_MIGRATION),
         metavar="PATH",
-        help="파이썬 원본 마이그레이션 모듈(기본: src/pynote/.../v0001_initial.py)",
+        help=(
+            "자기시험 교란의 대상이 되는 원본 모듈"
+            "(기본: src/pynote/.../v0001_initial.py). 실제 대조는 MIGRATIONS 전건을 쓴다"
+        ),
     )
     parser.add_argument(
         "--exe",
@@ -614,7 +503,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.self_test:
         return run_self_test(Path(args.python_migration))
-    return run_check(Path(args.python_migration), Path(args.exe), args.timeout)
+    return run_check(Path(args.exe), args.timeout)
 
 
 if __name__ == "__main__":

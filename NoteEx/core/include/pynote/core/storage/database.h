@@ -42,6 +42,11 @@ namespace pynote::core::storage
 		// 트랜잭션 밖 단문 실행. 실패 시 false 와 LastError.
 		bool Execute(const std::string& _sSql);
 
+		// 호출부가 실패 사유를 채운다. SQLite 가 아니라 도메인 규칙이 실패를 정하는 자리에
+		// 필요하다 - 파이썬 원본은 그런 사유도 예외 메시지로 올리므로(v0003 의 불변조건 검사)
+		// 이식이 반환값 규약을 쓰더라도 사유까지 잃으면 동작이 달라진다.
+		void SetLastError(const std::string& _sMessage);
+
 	private:
 		bool verify_pragma_(const std::string& _sPragma, const std::string& _sExpected);
 		void set_error_(const std::string& _sMessage);

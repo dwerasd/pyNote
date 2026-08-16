@@ -1,10 +1,11 @@
-// known-bad fixture: migrate() 가 발행하지 않는 문장이 같은 `SQL` 구분자로 들어갔다.
-// 게이트는 발행 문장 목록과 리터럴 목록을 순서대로 맞추므로 잉여 리터럴은
-// 문장 수 불일치로 드러난다 - 보조 질의에 이 구분자를 쓰면 안 된다.
+// known-bad fixture: 문장 2 만 u8 접두 없이 좁은 원시 문자열로 적혔다.
+// 본문은 바이트까지 같지만 이 기계에서 좁은 리터럴은 CP949 로 컴파일되므로
+// SQLite 에 넘어가는 바이트가 UTF-8 이 아니게 된다(SPEC §1(a)). 본문 대조만
+// 하는 게이트는 이 결함을 통과시킨다.
 
 #include <cstddef>
 
-namespace fixture::bad_extra_literal
+namespace fixture::bad_narrow_literal
 {
 	// 함정 1: 줄 주석 안의 u8R"SQL( 표기는 추출되면 안 된다.
 	/* 함정 2: 블록 주석 안의 u8R"SQL( 표기도 마찬가지다. */
@@ -45,7 +46,7 @@ namespace fixture::bad_extra_literal
         body TEXT NOT NULL
     )
     )SQL"),
-		u8R"SQL(
+		R"SQL(
     CREATE TABLE fixture_counters (
         name TEXT PRIMARY KEY,
         next_value INTEGER NOT NULL
@@ -67,10 +68,4 @@ namespace fixture::bad_extra_literal
     INSERT INTO fixture_alpha(id, label, kind, created_at_us)
     VALUES ('seed', 'seed', 'alpha', ?)
     )SQL");
-
-	// migrate() 가 발행한 적 없는 문장이다.
-	static const char* const g_szStray = u8R"SQL(
-    SELECT count(*)
-    FROM fixture_counters
-    )SQL";
 }

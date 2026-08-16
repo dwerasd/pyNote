@@ -22,6 +22,12 @@ namespace pynote::core::storage
 		MigrateFn pfnMigrate;
 	};
 
+	// 문장 하나를 실행하며 정수 파라미터 하나를 바인딩한다. 파이썬 원본이 applied_at_us 를
+	// 바인드 파라미터로 넘기므로(v0002~v0009 전건, v0001 말미 upsert), SQL 원문을 그대로
+	// 유지하려면 C_DATABASE::Execute 의 단문 경로가 아니라 이 경로가 필요하다.
+	// 실패 시 false 를 돌려주고 사유는 _database 의 LastError 규약과 같은 자리에 남긴다.
+	bool ExecuteBoundInt64(C_DATABASE& _database, const char* _pszSql, std::int64_t _nValue);
+
 	// 사전 마이그레이션 백업 훅. 파이썬 원본 BackupHook = Callable[[Path, int, int], None] 이식이다.
 	// 인자는 (데이터베이스 경로, 현재 버전, 목표 버전) 이고 목표 버전은 항상 LATEST 다 -
 	// 적용될 pending 의 최대 버전이 아니다(database.py:109 실측).
