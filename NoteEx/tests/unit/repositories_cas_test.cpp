@@ -589,6 +589,111 @@ TEST_CASE("create_cards 는 원문을 한 번만 저장하고 해시를 함께 �
 	REQUIRE(count_rows(Fixture.Db(), "capture_operations") == 1);
 }
 
+// 대응 원본: repositories.py 의 create_cards 5단계 순서(:756~801) 와 그 순서를 강제하는
+// v0001 의 지연 FK(:58, :72)·v0003 의 cards_current_revision_insert 트리거(:49).
+// 계약 대장 §4-2·§4-3: "더 안전해 보이는" 순서로 재배열해도 시험은 초록인데 동작이 달라진다.
+// 이 시험은 그 재배열이 실제로 막히는지를 본다 - 순서가 관례가 아니라 강제임을 고정한다.
+// 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
+TEST_CASE("create_cards 의 문장 순서는 스키마가 강제한다", "[core][storage][repositories]")
+{
+	C_REPO_FIXTURE Fixture("create_cards_order_forced");
+	REQUIRE(Fixture.Repo().CreateDocument(make_document()) == storage::E_REPO_RESULT::Ok);
+
+	domain::S_CAPTURE_OPERATION Operation;
+	Operation.sId          = "operation-1";
+	Operation.sDocumentId  = "document-1";
+	Operation.eSource      = domain::E_CAPTURE_OPERATION_SOURCE::Typing;
+	Operation.eSplitPolicy = domain::E_SPLIT_POLICY::Keep;
+	Operation.nCreatedAtUs = 2000;
+	REQUIRE(Fixture.Repo().CreateCaptureOperation(Operation) == storage::E_REPO_RESULT::Ok);
+
+	domain::S_EDIT_EVENT NewEvent;
+	NewEvent.sEventId      = "event-1";
+	NewEvent.sOperationId  = "operation-1";
+	NewEvent.sDocumentId   = "document-1";
+	NewEvent.sCardId       = "card-1";
+	NewEvent.eEventType    = domain::E_EVENT_TYPE::Create;
+	NewEvent.eSource       = domain::E_EVENT_SOURCE::Typing;
+	NewEvent.nOccurredAtUs = 2001;
+	NewEvent.sDetailsJson  = "{}";
+
+	const std::string sBody = u8s(u8"첫 카드");
+	domain::S_CARD Card;
+	Card.sId          = "card-1";
+	Card.sDocumentId  = "document-1";
+	Card.sOperationId = "operation-1";
+	Card.nPositionKey = 1024;
+	Card.nCaptureSeq  = 500;
+	Card.nCreatedAtUs = 2001;
+	Card.nUpdatedAtUs = 2001;
+	Card.eSource      = domain::E_CARD_SOURCE::Typing;
+	Card.sBody        = sBody;
+	Card.sBodyHash    = storage::TextHash(sBody);
+
+	domain::S_CARD_REVISION Revision;
+	Revision.sId          = "revision-1";
+	Revision.sCardId      = "card-1";
+	Revision.sBody        = sBody;
+	Revision.sBodyHash    = Card.sBodyHash;
+	Revision.eSource      = domain::E_REVISION_SOURCE::Edit;
+	Revision.nCreatedAtUs = 2001;
+
+	SECTION("리비전을 카드보다 먼저 넣으면 즉시 FK 가 막는다")
+	{
+		storage::C_TRANSACTION Transaction(Fixture.Db());
+		REQUIRE(Transaction.IsActive());
+
+		domain::S_EDIT_EVENT StoredEvent;
+		REQUIRE(Fixture.Repo().CreateEvent(NewEvent, &StoredEvent) == storage::E_REPO_RESULT::Ok);
+		Revision.nEventSeq = *StoredEvent.nEventSeq;
+
+		// card_revisions.card_id 는 지연 FK 가 아니라 즉시 FK 다.
+		REQUIRE(Fixture.Repo().CreateRevision(Revision) == storage::E_REPO_RESULT::Failed);
+	}
+
+	SECTION("카드에 리비전 id 를 미리 채워 넣으면 트리거가 중단시킨다")
+	{
+		storage::C_TRANSACTION Transaction(Fixture.Db());
+		REQUIRE(Transaction.IsActive());
+
+		domain::S_EDIT_EVENT StoredEvent;
+		REQUIRE(Fixture.Repo().CreateEvent(NewEvent, &StoredEvent) == storage::E_REPO_RESULT::Ok);
+
+		// 한 문장으로 줄이는 "최적화" 다. 그 시점에 리비전이 없으므로 ABORT 된다.
+		domain::S_CARD Prefilled = Card;
+		Prefilled.sCurrentRevisionId = "revision-1";
+		REQUIRE(Fixture.Repo().CreateCard(Prefilled) == storage::E_REPO_RESULT::Failed);
+	}
+
+	SECTION("원본 순서는 통과하고 이벤트가 카드보다 먼저인 것은 지연 FK 덕이다")
+	{
+		storage::C_TRANSACTION Transaction(Fixture.Db());
+		REQUIRE(Transaction.IsActive());
+
+		// edit_events.card_id 가 DEFERRABLE INITIALLY DEFERRED 라 아직 없는 카드를 가리켜도 통과한다.
+		domain::S_EDIT_EVENT StoredEvent;
+		REQUIRE(Fixture.Repo().CreateEvent(NewEvent, &StoredEvent) == storage::E_REPO_RESULT::Ok);
+		Revision.nEventSeq = *StoredEvent.nEventSeq;
+
+		REQUIRE(Fixture.Repo().CreateCard(Card) == storage::E_REPO_RESULT::Ok);
+		REQUIRE(Fixture.Repo().CreateRevision(Revision) == storage::E_REPO_RESULT::Ok);
+		REQUIRE(Fixture.Repo().LinkInitialRevision("card-1", "revision-1") == storage::E_REPO_RESULT::Ok);
+		REQUIRE(Transaction.Commit());
+
+		domain::S_CARD Fetched;
+		REQUIRE(Fixture.Repo().GetCard("card-1", &Fetched) == storage::E_REPO_RESULT::Ok);
+		REQUIRE(Fetched.sCurrentRevisionId.has_value());
+	}
+
+	SECTION("트랜잭션 없이 같은 순서를 흉내내면 지연 FK 가 성립하지 않는다")
+	{
+		// 자동 커밋에서는 문장 하나가 곧 트랜잭션이라 지연 FK 가 그 문장 끝에서 검사된다.
+		domain::S_EDIT_EVENT StoredEvent;
+		REQUIRE(Fixture.Repo().CreateEvent(NewEvent, &StoredEvent) == storage::E_REPO_RESULT::Failed);
+		REQUIRE(count_rows(Fixture.Db(), "edit_events") == 0);
+	}
+}
+
 // 대응 원본: repositories.py 의 create_cards 루프(:756~801).
 // 계약 대장 §4-17(last_insert_rowid 채취 시점), §4-22(시각 출처), §4-23(서로 다른 세 source).
 // 파이썬 시험 트리에 이 셋을 함께 고정하는 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
