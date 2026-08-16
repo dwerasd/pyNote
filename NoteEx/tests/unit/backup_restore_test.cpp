@@ -308,6 +308,51 @@ TEST_CASE("게시가 실패하면 원본 DB 세트를 통째로 되돌린다", "
 	REQUIRE(FileSystem.NoTemporaryLeftBehind());
 }
 
+// 대응 원본: backup.py 의 _restore_preserved_database_set 1단계 분기(:504~509) 와 그에 이어지는
+// finally(:199). **이 시험은 바람직한 동작이 아니라 원본의 실제 동작을 기록한다** - 계약 대장
+// §6-1 이 이 파일의 유일한 데이터 손실 경로로 지목한 자리이고, MODE A 라 고치지 않고 옮겼다.
+// 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
+TEST_CASE("첫 비켜두기가 실패하고 롤백 1단계가 성공하면 원본 DB 가 사라진다", "[core][storage][backup]")
+{
+	C_TEMP_TREE               Tree("restore_stage1_data_loss");
+	C_PROBE_FILE_SYSTEM       FileSystem;
+	storage::C_BACKUP_SERVICE Service(FileSystem);
+
+	const std::string sSource      = Tree.Child("source.sqlite3");
+	const std::string sBackup      = Tree.Child("backup.sqlite3");
+	const std::string sDestination = Tree.Child("live.sqlite3");
+	seed_database(sSource);
+
+	storage::S_BACKUP_INSPECTION Created;
+	REQUIRE(Service.Create(sSource, sBackup, &Created) == storage::E_BACKUP_RESULT::Ok);
+	write_original_set(sDestination);
+
+	// 도달 조건은 셋이다: 대상이 존재하고, 첫 비켜두기 교체가 실패해 옮긴 것이 없고,
+	// 롤백 1단계의 교체는 성공한다. 첫 교체 하나만 실패시키면 정확히 그 상태가 된다.
+	int nReplaceCalls = 0;
+	FileSystem.fnFailReplace = [&nReplaceCalls](const std::string&, const std::string&)
+		{
+			++nReplaceCalls;
+			return(nReplaceCalls == 1);
+		};
+
+	storage::S_BACKUP_INSPECTION Restored;
+	REQUIRE(Service.Restore(sBackup, sDestination, true, &Restored) == storage::E_BACKUP_RESULT::Failed);
+
+	// 롤백은 "성공"으로 판정된다 - 되돌리지 못한 경로가 없으므로 오류 종류도 바뀌지 않는다.
+	REQUIRE(Service.RollbackFailedPaths().empty());
+	REQUIRE(contains(Service.LastError(), "주입한 교체 실패"));
+
+	// 그리고 이것이 그 판정의 대가다. 롤백 1단계가 원본 DB 를 임시 이름으로 옮겼고
+	// 정리가 그 이름을 지웠다. 보존본은 만들어진 적이 없다.
+	REQUIRE_FALSE(FileSystem.Exists(sDestination));
+	REQUIRE(FileSystem.NoTemporaryLeftBehind());
+
+	// 사이드카는 첫 원소에서 루프가 끊겨 손대지 않은 채 남는다 - 본체만 사라진다.
+	REQUIRE(read_bytes(sDestination + "-wal") == "original wal");
+	REQUIRE(read_bytes(sDestination + "-shm") == "original shm");
+}
+
 // 대응 원본: backup.py 의 restore_database (:184~191 - 롤백까지 실패하면 원래 실패와 다른 오류다)
 // 와 _restore_preserved_database_set 의 실패 경로 보고(:503~516).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.

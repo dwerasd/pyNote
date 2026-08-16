@@ -189,6 +189,41 @@ TEST_CASE("마이그레이션 훅은 사전 백업을 만들고 러너 계약을
 		== storage::migrations::LatestSchemaVersion());
 }
 
+// 대응 원본: backup.py 의 MigrationBackupHook (:222 - 디렉터리를 주지 않으면 DB 옆의 "backups").
+// 판정은 None 인가이지 빈 경로인가가 아니므로 이식본도 optional 의 부재로만 이 갈래에 든다.
+// 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
+TEST_CASE("훅에 디렉터리를 주지 않으면 데이터베이스 옆 backups 에 만든다", "[core][storage][backup]")
+{
+	C_TEMP_TREE          Tree("hook_default_directory");
+	C_PROBE_FILE_SYSTEM  FileSystem;
+	storage::C_BACKUP_SERVICE Service(FileSystem);
+
+	// 부모가 트리 루트가 아니어야 "DB 옆"이 실제로 판정된 것인지 보인다.
+	const std::string sDatabase = Tree.Child("data\\previous.sqlite3");
+	REQUIRE(FileSystem.CreateDirectories(Tree.Child("data")));
+
+	execute_sql(sDatabase,
+		"CREATE TABLE schema_version ("
+		"  id INTEGER PRIMARY KEY,"
+		"  version INTEGER NOT NULL,"
+		"  applied_at_us INTEGER NOT NULL)");
+	execute_sql(sDatabase, "INSERT INTO schema_version (id, version, applied_at_us) VALUES (1, 0, 0)");
+
+	storage::C_MIGRATION_BACKUP_HOOK Hook(Service, std::nullopt, []() { return(CLOCK_20260102); });
+
+	// 러너를 거치지 않고 훅 계약만 직접 본다. 인자는 (경로, 현재 버전, 최종 버전) 이다.
+	REQUIRE(Hook(sDatabase, 0, 9));
+
+	const std::string sExpected =
+		Tree.Child("data\\backups\\previous.pre-migration-v0-to-v9-20260102T000000000000Z.sqlite3");
+	REQUIRE(Hook.LastBackupPath() == sExpected);
+	REQUIRE(FileSystem.Exists(sExpected));
+
+	storage::S_BACKUP_INSPECTION Inspection;
+	REQUIRE(Service.Inspect(sExpected, &Inspection) == storage::E_BACKUP_RESULT::Ok);
+	REQUIRE(Inspection.nSchemaVersion == 0);
+}
+
 // 대응 원본: backup.py 의 MigrationBackupHook (:228 - create_database_backup 실패는 그대로 전파된다)
 // 와 database.py 의 훅 실패 계약(:107~112). 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는
 // W0 T4 역보강 대기다.

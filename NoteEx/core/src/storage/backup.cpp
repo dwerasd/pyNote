@@ -1040,7 +1040,11 @@ namespace pynote::core::storage
 	bool C_AUTOMATIC_BACKUP_MANAGER::latest_backup_time_(std::int64_t* _pnValueUs) const
 	{
 		// 원본 _latest_backup_time(:269~275) - 패턴은 "{stem}.auto-*.sqlite3" 이고 판정은
-		// 가장 최근 수정 시각이다.
+		// 파일 이름의 시각이 아니라 가장 최근 **수정 시각**이다. 같은 디렉터리의 pre-migration
+		// 백업은 접두가 달라 주기 판정에 들어오지 않는다.
+		// 와일드카드는 접두/접미 대조로 옮긴다. 원본 Path.glob 은 fnmatch 라 stem 에 대괄호가
+		// 있으면 문자 클래스로 해석하지만 이쪽은 리터럴이다 - 실사용 경로에서 나오지 않는 차이라
+		// 그대로 두고 사실만 남긴다(계약 대장 §5-17).
 		std::vector<std::string> Names;
 		if (!m_FileSystem.ListDirectory(m_sBackupDirectory, &Names)) { return(false); }
 

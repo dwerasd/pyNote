@@ -178,8 +178,13 @@ namespace pynote::platform
 		std::string*       _psPath)
 	{
 		// tempfile.mkstemp 뒤에 close + unlink 까지가 원본의 한 연산이다(:531~540). 배타 생성이
-		// 성공한 이름만 돌려주므로 그 시점까지의 유일성은 확인된 것이고, 돌려준 뒤에 다른
-		// 프로세스가 같은 이름을 쓸 수 있다는 점도 원본과 같다.
+		// 성공한 이름만 돌려준다.
+		//
+		// CEILING: 이름을 돌려주기 전에 지우므로 "고유한 임시 파일"이 아니라 "고유했던 이름"이다 -
+		// 돌려준 뒤 실제로 쓰기까지 사이에 같은 이름이 다시 할당될 수 있다. 원본의 성질을 그대로
+		// 옮긴 것이며(계약 대장 §6-2) 핸들을 살려두거나 파일을 남겨서 막으면 원본과 갈린다.
+		// 파일을 남기면 뒤이은 원자 교체가 공유 위반으로 실패한다. 예약을 유지하려면 이 함수가
+		// 아니라 호출 규약 자체를 바꿔야 하므로 제품 판단이다.
 		const std::string sDirectory = (_sDirectory.empty() || _sDirectory == ".") ? std::string(".") : _sDirectory;
 		const bool        bNeedsSeparator = !is_separator(sDirectory.back());
 		const std::size_t nCharacters = std::char_traits<char>::length(TEMPORARY_NAME_CHARACTERS);
