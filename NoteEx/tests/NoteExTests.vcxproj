@@ -80,6 +80,7 @@
     <ClCompile Include="unit\migration_v0001_test.cpp" />
     <ClCompile Include="unit\migration_v0002_v0009_test.cpp" />
     <ClCompile Include="unit\migration_parity_emit.cpp" />
+    <ClCompile Include="unit\connection_pragma_emit.cpp" />
     <ClCompile Include="unit\domain_types_test.cpp" />
     <ClCompile Include="unit\repositories_test.cpp" />
     <ClCompile Include="unit\repositories_cas_test.cpp" />

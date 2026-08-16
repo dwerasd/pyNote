@@ -48,6 +48,9 @@
     <ClCompile Include="unit\migration_parity_emit.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\connection_pragma_emit.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\domain_types_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>

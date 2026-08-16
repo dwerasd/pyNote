@@ -46,6 +46,9 @@ namespace
 	};
 }
 
+// 대응 원본: tests/integration/test_database.py::test_new_v0_database_migrates_to_latest
+// (원본은 마이그레이션까지 한 시험에서 보고, 그중 연결에 PRAGMA foreign_keys 와
+// journal_mode 를 되물어 확인하는 두 줄이 이 시험의 계약이다 - test_database.py:121~122.)
 TEST_CASE("파일 데이터베이스를 열면 WAL 과 외래키가 실제로 켜져 있다", "[core][storage]")
 {
 	const C_TEMP_DB temp("open");
@@ -68,6 +71,10 @@ TEST_CASE("파일 데이터베이스를 열면 WAL 과 외래키가 실제로 �
 	::sqlite3_finalize(pStmt);
 }
 
+// 대응 원본: src/pynote/infrastructure/database.py 의 _read_schema_version (:84~93 -
+// sqlite_master 에 schema_version 테이블이 없으면 0 을 돌려준다). 파이썬은 Database 를
+// 만들자마자 마이그레이션해서 이 상태가 밖으로 드러나지 않아 대응 케이스가 없다 -
+// pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("schema_version 테이블이 없으면 버전은 0", "[core][storage]")
 {
 	const C_TEMP_DB temp("version_absent");
@@ -77,6 +84,10 @@ TEST_CASE("schema_version 테이블이 없으면 버전은 0", "[core][storage]"
 	REQUIRE(db.SchemaVersion() == 0);
 }
 
+// 대응 원본: tests/integration/test_database.py::test_new_v0_database_migrates_to_latest
+// (원본은 마이그레이션으로 올린 뒤 schema_version 을 읽어 LATEST 와 맞춘다 -
+// database.py:94~95 의 SELECT version FROM schema_version WHERE id = 1 이 같은 읽기다.
+// 여기서는 값을 직접 심어 읽는 쪽만 떼어 본다.)
 TEST_CASE("schema_version 값을 읽는다", "[core][storage]")
 {
 	const C_TEMP_DB temp("version_present");
@@ -89,6 +100,10 @@ TEST_CASE("schema_version 값을 읽는다", "[core][storage]")
 	REQUIRE(db.SchemaVersion() == 9);
 }
 
+// 대응 원본: src/pynote/infrastructure/database.py 의 transaction() (:59~62 -
+// BEGIN IMMEDIATE 로 열고 정상 탈출에서 commit 한다). 파이썬 시험 트리는 이 계약을
+// 상위 서비스 시험에서 수단으로만 쓰고 따로 고정하지 않아 pytest node ID 는
+// W0 T4 역보강 대기다.
 TEST_CASE("커밋한 트랜잭션의 변경은 남는다", "[core][storage]")
 {
 	const C_TEMP_DB temp("tx_commit");
@@ -111,6 +126,10 @@ TEST_CASE("커밋한 트랜잭션의 변경은 남는다", "[core][storage]")
 	::sqlite3_finalize(pStmt);
 }
 
+// 대응 원본: src/pynote/infrastructure/database.py 의 transaction() (:63~66 - 예외가
+// 나가면 rollback 하고 다시 올린다). 파이썬은 정상 탈출이 곧 커밋이라 커밋하지 않고
+// 나가는 경로 자체가 RAII 로 생긴 이식 고유 형태다. 파이썬 시험 트리에 되돌림 자체를
+// 고정하는 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("커밋하지 않고 범위를 벗어나면 전부 롤백된다", "[core][storage]")
 {
 	const C_TEMP_DB temp("tx_rollback");
@@ -133,6 +152,8 @@ TEST_CASE("커밋하지 않고 범위를 벗어나면 전부 롤백된다", "[co
 	::sqlite3_finalize(pStmt);
 }
 
+// 대응 원본: src/pynote/infrastructure/database.py 의 transaction() 중첩 거부 (:57~58).
+// 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("중첩 트랜잭션은 시작되지 않는다", "[core][storage]")
 {
 	const C_TEMP_DB temp("tx_nested");
@@ -195,6 +216,10 @@ TEST_CASE("커밋이 실패하면 트랜잭션을 되돌려 쓰기 잠금을 놓
 	::sqlite3_finalize(pStmt);
 }
 
+// 대응 원본 없음. 반환값 오류 규약 때문에 이식에서 새로 생긴 경로다 - 파이썬 Database 는
+// 생성자에서 열거나 예외를 올려서 열리지 않은 연결이라는 상태가 아예 없다
+// (database.py:21~30, :68~82). 사유를 LastError() 로 남기는 계약은 database.h 의
+// 반환값 규약이 소유한다. pytest node ID 는 존재하지 않는다.
 TEST_CASE("열리지 않은 연결은 실패를 사유와 함께 보고한다", "[core][storage]")
 {
 	pynote::core::storage::C_DATABASE db;

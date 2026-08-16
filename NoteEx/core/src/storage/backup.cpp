@@ -963,6 +963,8 @@ namespace pynote::core::storage
 		// 보존본도 없다. MODE A 라 고치지 않는다 - 수정은 이식 판단이 아니라 제품 판단이고
 		// 전환 기간에 파이썬 앱과 동작이 갈리면 그쪽이 더 나쁘다. 상향 경로는 파이썬 원본과
 		// 이식본을 함께 고치는 것이다.
+		// 같은 결함의 반대쪽 끝이다 - 원본을 임시 이름으로 옮기는 분기는 rollback_preserved_
+		// 에 있고 그쪽에도 같은 표시가 있다. 둘은 별개 결함이 아니라 한 경로다(계약 대장 §6-1).
 		if (!m_FileSystem.Remove(sTemporary)) { return(this->file_system_failed_()); }
 		return(eResult);
 	}

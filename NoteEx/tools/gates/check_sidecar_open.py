@@ -250,7 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     import migration_reference  # noqa: E402  (경로 삽입 후에만 적재 가능)
 
-    latest = migration_reference.latest_schema_version()
+    latest = migration_reference.latest_version(migration_reference.load_registry())
     sources = sorted(args.fixtures.glob("v*.db"))
     if not sources:
         print(f"오류: 대상 0건 - {_display(args.fixtures)} 에 fixture 가 없다.", file=sys.stderr)

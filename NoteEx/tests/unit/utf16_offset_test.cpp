@@ -15,6 +15,10 @@ namespace
 	constexpr const char* K_EMOJI = "a\xF0\x9F\x98\x80" "b";		// "a" + U+1F600 + "b" 6바이트 / 4단위
 }
 
+// 대응 원본 없음. UTF-8 바이트 인덱스와 UTF-16 코드 단위의 변환은 core 본문을 UTF-8 로
+// 잡으면서 이식에서 새로 생긴 계약이다(utf16_offset.h 설계 D1). 파이썬은 본문이 str 이고
+// QTextCursor.position() 이 곧 코드 단위라 변환할 자리가 없다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("빈 본문은 어느 방향이든 0", "[core][text][utf16]")
 {
 	REQUIRE(pynote::core::text::utf8_index_to_utf16_offset("", 0) == 0);
@@ -23,6 +27,9 @@ TEST_CASE("빈 본문은 어느 방향이든 0", "[core][text][utf16]")
 	REQUIRE(pynote::core::text::utf16_offset_to_utf8_index("", 7) == 0);
 }
 
+// 대응 원본 없음. 파이썬에는 UTF-8 바이트 인덱스라는 좌표 자체가 없어(본문은 str,
+// 커서는 QChar 단위) 두 좌표가 ASCII 구간에서 일치한다는 계약을 볼 시험이 없다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("ASCII 는 바이트와 코드 단위가 1대1", "[core][text][utf16]")
 {
 	for (std::size_t i = 0; i <= 5; ++i)
@@ -32,6 +39,9 @@ TEST_CASE("ASCII 는 바이트와 코드 단위가 1대1", "[core][text][utf16]"
 	}
 }
 
+// 대응 원본 없음. 파이썬이 다루는 좌표는 코드 단위 하나뿐이라 3바이트를 1 단위로 세는
+// 환산을 검사할 자리가 없다. 계약 정의는 utf16_offset.h 의 두 함수 주석이다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("한글은 3바이트가 1 코드 단위", "[core][text][utf16]")
 {
 	REQUIRE(pynote::core::text::utf8_index_to_utf16_offset(K_HANGUL, 0) == 0);
@@ -43,6 +53,10 @@ TEST_CASE("한글은 3바이트가 1 코드 단위", "[core][text][utf16]")
 	REQUIRE(pynote::core::text::utf16_offset_to_utf8_index(K_HANGUL, 3) == 9);
 }
 
+// 대응 원본 없음. 파이썬에서 비BMP 를 코드 단위 2 로 세는 것은 Qt 가 하고, 그래서
+// card_delegate.py:180~197 은 QTextLayout 오프셋을 쓰려고 본문을 utf-16-le 로 인코딩해
+// start*2 로 자른다. 그 환산값을 직접 고정하는 파이썬 시험은 없다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("비BMP 문자는 UTF-16 에서 2 단위", "[core][text][utf16]")
 {
 	// "a"(1바이트/1단위) + U+1F600(4바이트/2단위) + "b"(1바이트/1단위)
@@ -55,6 +69,10 @@ TEST_CASE("비BMP 문자는 UTF-16 에서 2 단위", "[core][text][utf16]")
 	REQUIRE(pynote::core::text::utf16_offset_to_utf8_index(K_EMOJI, 4) == 6);
 }
 
+// 대응 원본 없음. 파이썬에는 문자 중간 오프셋을 내림하는 코드가 없다 - 저장된 값을
+// 범위만 잘라 QTextCursor 에 그대로 넘긴다(card_editor.py:1088~1093).
+// tests/ui/test_card_stream.py 의 서로게이트 시험은 미리보기 절단이 쌍을 쪼개지 않는지를
+// 볼 뿐 이 내림 계약이 아니다. pytest node ID 는 존재하지 않는다.
 TEST_CASE("문자 중간을 가리키면 그 문자의 시작으로 내린다", "[core][text][utf16]")
 {
 	// 한글 첫 글자 안쪽 바이트 1, 2 는 모두 문자 시작(0 단위)으로 내려간다.
@@ -65,6 +83,10 @@ TEST_CASE("문자 중간을 가리키면 그 문자의 시작으로 내린다", 
 	REQUIRE(pynote::core::text::utf16_offset_to_utf8_index(K_EMOJI, 2) == 1);
 }
 
+// 대응 원본: tests/ui/test_card_editor.py::test_recovered_cursor_is_clamped_with_qtextcursor_position
+// (원본은 UI 층 _restore_cursor_qchar 의 min/max 클램프를 본다 - card_editor.py:1088~1093,
+// 저장된 999 가 문서 끝으로 잘린다. 이식은 커서 좌표가 사용자 DB 에서 들어오는 외부
+// 입력이라 경계 처리를 core 변환 함수로 옮겼다 - utf16_offset.h 의 두 함수 주석.)
 TEST_CASE("범위를 넘는 입력은 끝으로 클램프", "[core][text][utf16]")
 {
 	REQUIRE(pynote::core::text::utf8_index_to_utf16_offset(K_HANGUL, 100) == 3);
@@ -73,6 +95,9 @@ TEST_CASE("범위를 넘는 입력은 끝으로 클램프", "[core][text][utf16]
 	REQUIRE(pynote::core::text::utf16_offset_to_utf8_index(K_EMOJI, 100) == 6);
 }
 
+// 대응 원본 없음. 두 좌표계가 서로의 역함수라는 성질은 core 본문을 UTF-8 로 잡으면서
+// 생긴 이식 고유 계약이라 파이썬에 대응할 자리가 없다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("문자 경계에서는 두 함수가 서로의 역함수", "[core][text][utf16]")
 {
 	const char* pSamples[] = { K_ASCII, K_HANGUL, K_EMOJI };

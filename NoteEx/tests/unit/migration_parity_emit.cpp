@@ -50,6 +50,9 @@ namespace
 }
 
 // 대응 원본: src/pynote/infrastructure/migrations/ 의 v0001~v0009 가 빈 데이터베이스에 만드는 스키마.
+// 이 TEST_CASE 자체는 parity 대조용 생성기라 대응하는 파이썬 시험이 없다 - 뽑은 실물의
+// 대조는 tools/gates/check_migration_ladder_parity.py 가 한다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("parity 데이터베이스를 새로 생성한다", "[.][parity-emit]")
 {
 	const std::filesystem::path OutPath  = parity_target_path();
@@ -79,6 +82,9 @@ TEST_CASE("parity 데이터베이스를 새로 생성한다", "[.][parity-emit]"
 // 대응 원본: database.py 의 기존 데이터베이스 경로(_had_database = True) 로 러너를 도는 흐름.
 // 사다리 게이트가 중간 버전 fixture 를 여기로 밀어 넣어 v9 까지 올린다 - 대상이 없으면
 // 실패하는 것이 맞다. 없는 파일을 새로 만들면 fixture 를 올린 것이 아니라 새로 만든 것이 된다.
+// 이 TEST_CASE 도 parity 대조용 생성기라 대응하는 파이썬 시험이 없다 - 올린 실물의
+// 대조는 tools/gates/check_migration_ladder_parity.py 가 한다.
+// pytest node ID 는 존재하지 않는다.
 TEST_CASE("이미 있는 데이터베이스를 최신 스키마로 올린다", "[.][parity-upgrade]")
 {
 	const std::filesystem::path OutPath  = parity_target_path();
