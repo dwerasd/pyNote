@@ -116,6 +116,7 @@ NODE_BARE = re.compile(r"(?<![\w.\])/])::([A-Za-z_]\w*)(\[[^\]\s]*\])?")
 
 TEST_MACRO = re.compile(r"\bTEST_CASE\s*\(")
 RAW_PREFIX = re.compile(r"(?:u8|u|U|L)?R$")
+CHAR_PREFIX = re.compile(r"(?:u8|u|U|L)$")
 
 
 class GateEnvironmentError(RuntimeError):
@@ -194,7 +195,7 @@ def scan_source(source: str) -> Scan:
                 if opener == -1:
                     scan.unterminated = f"{line} 줄의 원시 문자열 구분자를 읽지 못했다"
                     break
-                closer = f"){source[index + 1 : opener]}\""
+                closer = f'){source[index + 1 : opener]}"'
                 end = source.find(closer, opener)
                 if end == -1:
                     scan.unterminated = f"{line} 줄에서 시작한 원시 문자열이 닫히지 않았다"
@@ -212,6 +213,13 @@ def scan_source(source: str) -> Scan:
             continue
 
         if char == "'":
+            # `1'000` 의 자릿수 구분자는 문자 리터럴이 아니다. 이것을 여는 따옴표로
+            # 읽으면 다음 `'` 까지를 통째로 삼켜 그 사이의 TEST_CASE 가 조용히 사라진다.
+            # 문자 리터럴 접두(`L'a'` `u8'a'`)와는 접두 글자를 보고 가른다.
+            previous = source[index - 1] if index else ""
+            if previous.isalnum() and CHAR_PREFIX.search(source[max(0, index - 2) : index]) is None:
+                index += 1
+                continue
             end = _skip_quoted(source, index, "'")
             if end is None:
                 scan.unterminated = f"{line} 줄에서 시작한 문자 리터럴이 닫히지 않았다"

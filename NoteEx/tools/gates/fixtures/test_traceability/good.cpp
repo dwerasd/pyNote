@@ -19,6 +19,14 @@ namespace
 	constexpr const char8_t* K_RAW_DECOY = u8R"SQL(
 		SELECT "TEST_CASE(" FROM t -- // 여기도 아니다
 		)SQL";
+	// 문자 리터럴 접두는 자릿수 구분자와 갈라야 한다. 이스케이프된 작은따옴표도 담는다.
+	constexpr wchar_t K_WIDE = L'\'';
+	constexpr char8_t K_UTF8 = u8'a';
+	// 자릿수 구분자는 문자 리터럴이 아니다. 이것을 여는 따옴표로 읽으면 다음 `'` 까지를
+	// 통째로 삼키는데, 이 파일에는 뒤에 `'` 가 하나도 없으므로 끝까지 삼켜 아래 일곱
+	// TEST_CASE 가 전부 사라진다. 홀수 개라야 물리므로 일부러 하나만, 뒤에 `'` 가 남지
+	// 않는 자리에 넣었다.
+	constexpr long long K_MICROS = 1'000;
 }
 
 // 배치 1: 한 줄에 직접.
