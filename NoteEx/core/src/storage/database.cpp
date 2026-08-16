@@ -196,6 +196,16 @@ namespace pynote::core::storage
 		if (!m_bActive) { return(false); }
 
 		const bool bResult = m_Database.Execute("COMMIT");
+		if (!bResult && ::sqlite3_get_autocommit(m_Database.Handle()) == 0)
+		{
+			// 원본 transaction() 은 commit() 이 던지면 rollback() 을 부르고 예외를 올린다
+			// (database.py:62~66). 커밋이 실패했는데 트랜잭션이 아직 열려 있으면 되돌려
+			// 쓰기 잠금을 놓아야 한다 - 안 그러면 다음 BEGIN IMMEDIATE 가 막혀 연결이 고착된다.
+			// SQLite 가 이미 자동 롤백한 경우에는 부르지 않는다. 그래야 COMMIT 실패 사유가
+			// LastError 에 남고 "no transaction is active" 로 덮이지 않는다.
+			m_Database.Execute("ROLLBACK");
+		}
+
 		m_bActive = false;
 		return(bResult);
 	}

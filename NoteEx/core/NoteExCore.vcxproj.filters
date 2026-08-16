@@ -17,12 +17,30 @@
     <ClInclude Include="include\pynote\core\storage\database.h">
       <Filter>저장</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migration_runner.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\registry.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0001_initial.h">
+      <Filter>저장</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\text\utf16_offset.cpp">
       <Filter>텍스트</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migration_runner.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\registry.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0001_initial.cpp">
       <Filter>저장</Filter>
     </ClCompile>
   </ItemGroup>

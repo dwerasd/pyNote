@@ -151,6 +151,50 @@ TEST_CASE("중첩 트랜잭션은 시작되지 않는다", "[core][storage]")
 	REQUIRE(outer.IsActive());
 }
 
+// 대응 원본: src/pynote/infrastructure/database.py 의 transaction() (:62~66 - commit() 이
+// 던지면 rollback() 을 부르고 예외를 올린다). 파이썬 시험 트리에 대응 케이스가 없어
+// pytest node ID 는 W0 T4 역보강 대기다.
+TEST_CASE("커밋이 실패하면 트랜잭션을 되돌려 쓰기 잠금을 놓는다", "[core][storage]")
+{
+	const C_TEMP_DB temp("tx_commit_failure");
+	pynote::core::storage::C_DATABASE db;
+	REQUIRE(db.Open(temp.Utf8()));
+
+	// 지연 외래키는 COMMIT 시점에 검사된다. COMMIT 을 결정적으로 실패시키는 가장 싼 수단이고,
+	// v0001 스키마가 실제로 쓰는 구성이다(cards.current_revision_id 의 DEFERRABLE INITIALLY DEFERRED).
+	REQUIRE(db.Execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)"));
+	REQUIRE(db.Execute(
+		"CREATE TABLE child ("
+		"  id INTEGER PRIMARY KEY,"
+		"  parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)"));
+
+	{
+		pynote::core::storage::C_TRANSACTION tx(db);
+		REQUIRE(tx.IsActive());
+
+		// 지연 검사라 삽입 자체는 통과하고 COMMIT 에서 걸린다.
+		REQUIRE(db.Execute("INSERT INTO child (id, parent_id) VALUES (1, 999)"));
+		REQUIRE_FALSE(tx.Commit());
+		REQUIRE_FALSE(tx.IsActive());
+	}
+
+	// 여기가 이 시험의 판별 지점이다. 커밋 실패를 방치하면 SQLite 트랜잭션이 열린 채 남아
+	// autocommit 이 0 이고 다음 BEGIN IMMEDIATE 가 막힌다 - 파이썬이 풀어 주는 잠금을
+	// 이식본이 쥔 채 끝나는 동작 편차다.
+	REQUIRE(::sqlite3_get_autocommit(db.Handle()) != 0);
+
+	pynote::core::storage::C_TRANSACTION next(db);
+	REQUIRE(next.IsActive());
+	REQUIRE(next.Commit());
+
+	// 위반 행은 남지 않는다.
+	sqlite3_stmt* pStmt = nullptr;
+	REQUIRE(::sqlite3_prepare_v2(db.Handle(), "SELECT COUNT(*) FROM child", -1, &pStmt, nullptr) == SQLITE_OK);
+	REQUIRE(::sqlite3_step(pStmt) == SQLITE_ROW);
+	REQUIRE(::sqlite3_column_int(pStmt, 0) == 0);
+	::sqlite3_finalize(pStmt);
+}
+
 TEST_CASE("열리지 않은 연결은 실패를 사유와 함께 보고한다", "[core][storage]")
 {
 	pynote::core::storage::C_DATABASE db;
