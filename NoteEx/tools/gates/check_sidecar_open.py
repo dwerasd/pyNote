@@ -250,11 +250,38 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     import migration_reference  # noqa: E402  (경로 삽입 후에만 적재 가능)
 
-    latest = migration_reference.latest_version(migration_reference.load_registry())
+    entries = migration_reference.load_registry()
+    latest = migration_reference.latest_version(entries)
     sources = sorted(args.fixtures.glob("v*.db"))
     if not sources:
         print(f"오류: 대상 0건 - {_display(args.fixtures)} 에 fixture 가 없다.", file=sys.stderr)
         return 2
+
+    # 커버리지 강제. 있는 fixture 를 그냥 받아들이면 요구 범위보다 적게 돌고도 "전건 통과"
+    # 를 보고한다 - 실제로 사다리 생성기가 v1~v8 만 만들어 **이미 최신 버전인 사용자 세트**
+    # (v{latest} 시작)가 통째로 빠졌다. 그 경로는 pending 이 비어 러너가 아무것도 안 하는
+    # 대신 세트 개방과 WAL 잔여분 보존만 시험하는 자리이고, 전환이 끝난 사용자 대부분이
+    # 실제로 그 상태다. 게이트가 스스로 범위를 검사하지 않으면 같은 누락이 조용히 재발한다.
+    have = {int(p.stem.lstrip("vV")) for p in sources if p.stem.lstrip("vV").isdigit()}
+    required = set(range(1, latest + 1))
+    missing = sorted(required - have)
+    if missing:
+        # v{latest} 만 빠진 경우는 여기서 만들어 채운다 - 빈 파일에서 최신까지 올린 것이
+        # 곧 "이미 최신인 사용자 데이터베이스" 다. 그 밖의 결손은 생성기 소관이라 멈춘다.
+        if missing == [latest]:
+            made = args.fixtures / f"v{latest:04d}.db"
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(made) + suffix).unlink(missing_ok=True)
+            migration_reference.build_database(made, entries, applied_at_us=1)
+            sources = sorted(args.fixtures.glob("v*.db"))
+            print(f"  보충: v{latest} fixture 를 만들어 채웠다(이미 최신인 사용자 세트)")
+        else:
+            print(
+                f"오류: 요구 버전 {sorted(required)} 중 {missing} 이 없다."
+                " make_ladder_fixtures.py 로 먼저 만든다.",
+                file=sys.stderr,
+            )
+            return 2
 
     print(f"C++ 러너: {_display(args.exe)} / 최신 버전 {latest}")
     failures = 0
