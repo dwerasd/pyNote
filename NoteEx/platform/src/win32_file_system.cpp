@@ -177,7 +177,7 @@ namespace pynote::platform
 		const std::string& _sSuffix,
 		std::string*       _psPath)
 	{
-		// tempfile.mkstemp 뒤에 close 까지가 원본의 한 연산이다(:531~540). 배타 생성이 성공한
+		// tempfile.mkstemp 뒤에 close 까지가 원본의 한 연산이다(:549~558). 배타 생성이 성공한
 		// 이름을 0바이트 예약 파일과 함께 돌려준다 - 지우고 이름만 돌려주던 구 동작은 반환과
 		// 사용 사이에 같은 이름이 다시 할당될 수 있는 예약 해제 경쟁이었고(구 계약 대장 §6-2),
 		// 제품 판단으로 파이썬 원본과 함께 수정했다. 소비처는 SQLite 생성 대상 아니면 원자

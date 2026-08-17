@@ -13,7 +13,7 @@ namespace
 	using namespace backup_support;
 
 	// 2026-01-02T00:00:00Z 의 epoch 마이크로초다. 파이썬 시험이 훅에 물리는 고정 시각과 같다
-	// (tests/integration/test_backup.py:425).
+	// (tests/integration/test_backup.py:587).
 	const std::int64_t CLOCK_20260102 = 1767312000LL * 1000000LL;
 
 	bool contains(const std::string& _sText, const char* _pszNeedle)
@@ -142,7 +142,7 @@ TEST_CASE("임시 파일을 지우지 못하면 게시를 마쳤어도 실패로
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_migration_hook_creates_valid_pre_migration_backup
-// (backup.py 의 MigrationBackupHook :202~229, database.py 의 훅 호출 계약).
+// (backup.py 의 MigrationBackupHook :205~232, database.py 의 훅 호출 계약).
 TEST_CASE("마이그레이션 훅은 사전 백업을 만들고 러너 계약을 만족한다", "[core][storage][backup]")
 {
 	C_TEMP_TREE          Tree("hook_ok");
@@ -190,7 +190,7 @@ TEST_CASE("마이그레이션 훅은 사전 백업을 만들고 러너 계약을
 		== storage::migrations::LatestSchemaVersion());
 }
 
-// 대응 원본: backup.py 의 MigrationBackupHook (:222 - 디렉터리를 주지 않으면 DB 옆의 "backups").
+// 대응 원본: backup.py 의 MigrationBackupHook (:225 - 디렉터리를 주지 않으면 DB 옆의 "backups").
 // 판정은 None 인가이지 빈 경로인가가 아니므로 이식본도 optional 의 부재로만 이 갈래에 든다.
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("훅에 디렉터리를 주지 않으면 데이터베이스 옆 backups 에 만든다", "[core][storage][backup]")
@@ -225,7 +225,7 @@ TEST_CASE("훅에 디렉터리를 주지 않으면 데이터베이스 옆 backup
 	REQUIRE(Inspection.nSchemaVersion == 0);
 }
 
-// 대응 원본: backup.py 의 MigrationBackupHook (:228 - create_database_backup 실패는 그대로 전파된다)
+// 대응 원본: backup.py 의 MigrationBackupHook (:231 - create_database_backup 실패는 그대로 전파된다)
 // 와 database.py 의 훅 실패 계약(:107~112). 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는
 // W0 T4 역보강 대기다.
 TEST_CASE("훅이 백업에 실패하면 마이그레이션을 진행하지 않는다", "[core][storage][backup]")
@@ -264,7 +264,7 @@ TEST_CASE("훅이 백업에 실패하면 마이그레이션을 진행하지 않�
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_automatic_backup_obeys_interval_and_quick_check_period
-// 의 앞 절반(backup.py 의 AutomaticBackupManager :232~267 - 벽시계로 재는 주기).
+// 의 앞 절반(backup.py 의 AutomaticBackupManager :235~270 - 벽시계로 재는 주기).
 TEST_CASE("자동 백업은 벽시계 주기가 지났을 때만 만든다", "[core][storage][backup]")
 {
 	C_TEMP_TREE          Tree("auto_interval");
@@ -303,7 +303,7 @@ TEST_CASE("자동 백업은 벽시계 주기가 지났을 때만 만든다", "[c
 	REQUIRE(FileSystem.Exists(sThird));
 }
 
-// 대응 원본: backup.py 의 AutomaticBackupManager._latest_backup_time (:269~275 - 기억한 시각이
+// 대응 원본: backup.py 의 AutomaticBackupManager._latest_backup_time (:272~278 - 기억한 시각이
 // 없으면 디렉터리에 남은 가장 최근 백업의 수정 시각을 본다).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("자동 백업은 기억한 시각이 없으면 남아 있는 백업의 수정 시각을 본다", "[core][storage][backup]")
@@ -360,7 +360,7 @@ TEST_CASE("자동 백업은 기억한 시각이 없으면 남아 있는 백업�
 	}
 }
 
-// 대응 원본: backup.py 의 run_if_due 의 force 갈래(:259) 와 set_interval_hours (:249~253).
+// 대응 원본: backup.py 의 run_if_due 의 force 갈래(:262) 와 set_interval_hours (:252~256).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("자동 백업은 force 면 주기를 무시하고 0 이하 주기는 거절한다", "[core][storage][backup]")
 {
@@ -399,7 +399,7 @@ TEST_CASE("자동 백업은 force 면 주기를 무시하고 0 이하 주기는 
 	REQUIRE(Clock.Consumed() == 3);
 }
 
-// 대응 원본: backup.py 의 AutomaticBackupManager.__init__ (:247 - 생성 시점의 주기 검증).
+// 대응 원본: backup.py 의 AutomaticBackupManager.__init__ (:250 - 생성 시점의 주기 검증).
 // 파이썬은 생성자에서 ValueError 를 올려 객체가 아예 만들어지지 않지만 이식본의 생성자는
 // 실패를 알릴 수 없으므로 그 거절을 IsValid 와 RunIfDue 결과로 옮겼다.
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
@@ -432,7 +432,7 @@ TEST_CASE("생성 시점에 거절된 주기를 가진 관리자는 백업하지
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_automatic_backup_obeys_interval_and_quick_check_period
-// 의 뒤 절반(backup.py 의 PeriodicQuickCheck :278~306 - 단조시계로 재는 요율 제한).
+// 의 뒤 절반(backup.py 의 PeriodicQuickCheck :281~309 - 단조시계로 재는 요율 제한).
 TEST_CASE("주기적 quick_check 는 단조시계 주기가 지났을 때만 검사한다", "[core][storage][backup]")
 {
 	C_TEMP_TREE Tree("quick_check_period");
@@ -462,7 +462,7 @@ TEST_CASE("주기적 quick_check 는 단조시계 주기가 지났을 때만 검
 	::sqlite3_close(pConnection);
 }
 
-// 대응 원본: backup.py 의 PeriodicQuickCheck (:288~289 주기 검증, :304~305 실패 시 시각 미갱신).
+// 대응 원본: backup.py 의 PeriodicQuickCheck (:291~292 주기 검증, :307~308 실패 시 시각 미갱신).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("quick_check 실패는 마지막 검사 시각을 갱신하지 않는다", "[core][storage][backup]")
 {

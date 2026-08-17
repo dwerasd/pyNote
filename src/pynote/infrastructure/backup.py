@@ -178,6 +178,9 @@ def restore_database(
             os.replace(temporary_path, destination)
         except BaseException as error:
             rollback_errors = _restore_preserved_database_set(
+                destination=destination,
+                temporary_path=temporary_path,
+                existing_paths=existing_paths,
                 moved_paths=moved_paths,
                 preserved_paths=preserved_paths,
             )
@@ -495,24 +498,39 @@ def _validate_restore_targets(paths: tuple[Path, ...]) -> None:
 
 def _restore_preserved_database_set(
     *,
+    destination: Path,
+    temporary_path: Path,
+    existing_paths: tuple[Path, ...],
     moved_paths: list[Path],
     preserved_paths: dict[Path, Path],
 ) -> tuple[Path, ...]:
-    # 설치 교체는 복원 절차의 마지막 연산이라 성공한 뒤 이 롤백이 불리는 상태는 없다.
-    # destination 을 직접 옮기던 구 1단계 분기는 도달 가능한 유일 상태(첫 비켜두기
-    # 실패)에서 원본 DB 를 임시 이름으로 옮겨 finally 삭제에 넘겼으므로 제거했다.
     failed_paths: list[Path] = []
+    # 게시 롤백은 "우리가 설치한 새 DB"로 확정되는 상태에서만 한다: 진입 시점에
+    # destination 이 없었는데(existing_paths 밖) 지금 존재하면 그것은 설치된 새
+    # 본체뿐이다(시그널 예외가 설치 성공과 반환 사이에 끼는 창). 진입 시점 존재를
+    # 보지 않던 구 분기는 첫 비켜두기 실패 상태(destination=원본)에서 원본을 임시
+    # 이름으로 옮겨 finally 삭제에 넘겼다.
+    if destination not in existing_paths and destination.exists():
+        try:
+            os.replace(destination, temporary_path)
+        except OSError:
+            LOGGER.exception("새 복원 DB를 롤백하지 못했습니다: %s", destination)
+            failed_paths.append(destination)
     for path in reversed(moved_paths):
         try:
             os.replace(preserved_paths[path], path)
         except OSError:
             LOGGER.exception("보존한 원본 DB 파일을 복구하지 못했습니다: %s", path)
             failed_paths.append(path)
-    # 옮기지 못한 자리의 예약 파일은 빈 자리표시자다 - 지워서 잔존물을 남기지
-    # 않는다. 옮긴 자리의 예약 파일은 원본 데이터를 들고 있으므로 건드리지 않는다.
+    # 예약 파일은 원본이 아직 제자리에 있을 때만 지운다 - 이동 성공과 기록 사이에
+    # 시그널 예외가 끼면 기록 없는 예약 파일이 원본을 들고 있으므로 보존한다.
+    # 삭제 실패는 원래 오류를 가리지 않도록 기록만 남긴다(_discard 와 같은 계약).
     for path, placeholder in preserved_paths.items():
-        if path not in moved_paths:
-            placeholder.unlink(missing_ok=True)
+        if path not in moved_paths and path.exists():
+            try:
+                placeholder.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.exception("쓰지 않은 예약 파일을 지우지 못했습니다: %s", placeholder)
     return tuple(failed_paths)
 
 

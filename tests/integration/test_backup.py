@@ -416,6 +416,107 @@ def test_restore_keeps_original_database_when_first_move_aside_fails(
     assert not tuple(tmp_path.glob("*.tmp"))
 
 
+def test_interrupted_move_aside_keeps_original_in_reservation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    backup_path = tmp_path / "backup.sqlite3"
+    destination = tmp_path / "live.sqlite3"
+    _seed_database(source)
+    create_database_backup(source, backup_path)
+    destination.write_bytes(b"original database")
+    real_replace = backup_module.os.replace
+    armed = {"value": True}
+
+    def move_then_interrupt(source_path: Path, destination_path: Path) -> None:
+        # 효과는 내고 경계에서 시그널 예외가 드는 창을 재현한다 - moved_paths 기록 전이다.
+        real_replace(source_path, destination_path)
+        if armed["value"]:
+            armed["value"] = False
+            raise KeyboardInterrupt("이동 직후 중단 주입")
+
+    monkeypatch.setattr(backup_module.os, "replace", move_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        restore_database(backup_path, destination, overwrite=True)
+
+    # 원본은 기록 없는 예약 파일 안에 살아남아야 한다 - 정리 루프가 지우면 안 된다.
+    leftovers = tuple(tmp_path.glob("*.tmp"))
+    assert not destination.exists()
+    assert len(leftovers) == 1
+    assert leftovers[0].read_bytes() == b"original database"
+
+
+def test_interrupted_install_unpublishes_new_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    backup_path = tmp_path / "backup.sqlite3"
+    destination = tmp_path / "live.sqlite3"
+    _seed_database(source)
+    create_database_backup(source, backup_path)
+    real_replace = backup_module.os.replace
+    armed = {"value": True}
+
+    def install_then_interrupt(source_path: Path, destination_path: Path) -> None:
+        real_replace(source_path, destination_path)
+        if armed["value"] and Path(destination_path) == destination:
+            armed["value"] = False
+            raise KeyboardInterrupt("설치 직후 중단 주입")
+
+    monkeypatch.setattr(backup_module.os, "replace", install_then_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        restore_database(backup_path, destination, overwrite=True)
+
+    # 진입 시점에 없던 destination 이 남아 있으면 실패 보고와 게시가 모순된다.
+    assert not destination.exists()
+    assert not tuple(tmp_path.glob("*.tmp"))
+
+
+def test_reservation_cleanup_failure_keeps_original_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    backup_path = tmp_path / "backup.sqlite3"
+    destination = tmp_path / "live.sqlite3"
+    _seed_database(source)
+    create_database_backup(source, backup_path)
+    destination.write_bytes(b"original database")
+    real_replace = backup_module.os.replace
+    real_unlink = Path.unlink
+    replace_calls = {"value": 0}
+    unlink_armed = {"value": True}
+
+    def fail_first_move_aside(source_path: Path, destination_path: Path) -> None:
+        replace_calls["value"] += 1
+        if replace_calls["value"] == 1:
+            raise OSError("비켜두기 실패 주입")
+        real_replace(source_path, destination_path)
+
+    def fail_first_reservation_unlink(
+        self: Path, *args: object, **kwargs: object
+    ) -> None:
+        if unlink_armed["value"] and self.suffix == ".tmp":
+            unlink_armed["value"] = False
+            raise PermissionError("예약 정리 거부 주입")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(backup_module.os, "replace", fail_first_move_aside)
+    monkeypatch.setattr(Path, "unlink", fail_first_reservation_unlink)
+
+    # 정리 실패가 원래 오류(비켜두기 실패)를 가리면 안 된다.
+    with pytest.raises(OSError, match="비켜두기 실패 주입"):
+        restore_database(backup_path, destination, overwrite=True)
+
+    assert destination.read_bytes() == b"original database"
+    # 지우지 못한 예약 파일 하나는 잔존을 허용한다 - 오류 보존이 우선이다.
+    assert len(tuple(tmp_path.glob("*.tmp"))) <= 1
+
+
 def test_temporary_database_path_reserves_name_until_replaced(
     tmp_path: Path,
 ) -> None:

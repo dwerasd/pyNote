@@ -70,13 +70,13 @@ namespace
 	}
 
 	// 파이썬 원본의 `type(value) is not str` 은 sqlite3 가 TEXT 열에만 str 을 주는 것에
-	// 기대고 있다(:462~465). 정수/실수/BLOB/NULL 은 전부 실패다.
+	// 기대고 있다(:465~468). 정수/실수/BLOB/NULL 은 전부 실패다.
 	bool is_text(sqlite3_stmt* _pStmt, int _nIndex)
 	{
 		return(::sqlite3_column_type(_pStmt, _nIndex) == SQLITE_TEXT);
 	}
 
-	// 같은 이유로 `type(value) is not int` 는 INTEGER 열만 참이다(:421, :427).
+	// 같은 이유로 `type(value) is not int` 는 INTEGER 열만 참이다(:424, :430).
 	bool is_integer(sqlite3_stmt* _pStmt, int _nIndex)
 	{
 		return(::sqlite3_column_type(_pStmt, _nIndex) == SQLITE_INTEGER);
@@ -126,13 +126,13 @@ namespace
 		return(_sDirectory + "\\" + _sName);
 	}
 
-	// 원본 _temporary_database_path(:531~540) 가 만드는 이름의 접두다.
+	// 원본 _temporary_database_path(:549~558) 가 만드는 이름의 접두다.
 	std::string temporary_prefix(const std::string& _sPath)
 	{
 		return("." + file_name(_sPath) + ".");
 	}
 
-	// 원본 datetime.strftime("%Y%m%dT%H%M%S%fZ")(:223, :261). UTC 이고 %f 는 여섯 자리다.
+	// 원본 datetime.strftime("%Y%m%dT%H%M%S%fZ")(:226, :264). UTC 이고 %f 는 여섯 자리다.
 	// epoch 이전 시각은 이 앱의 시계에서 나오지 않으므로 다루지 않는다.
 	std::string format_backup_timestamp(std::int64_t _nEpochUs)
 	{
@@ -187,7 +187,7 @@ namespace
 		const std::string& _sLabel,
 		std::string*       _psError)
 	{
-		// 원본 _validate_text_hash(:468~471) - UTF-8 바이트의 SHA-256 소문자 16진수다.
+		// 원본 _validate_text_hash(:471~474) - UTF-8 바이트의 SHA-256 소문자 16진수다.
 		if (storage::TextHash(_sText) != _sStoredHash)
 		{
 			*_psError = _sLabel + "의 SHA-256 해시가 일치하지 않습니다.";
@@ -203,7 +203,7 @@ namespace
 		std::string*       _psValue,
 		std::string*       _psError)
 	{
-		// 원본 _validated_text(:462~465).
+		// 원본 _validated_text(:465~468).
 		if (!is_text(_pStmt, _nIndex))
 		{
 			*_psError = _sLabel + "가 문자열이 아닙니다.";
@@ -215,7 +215,7 @@ namespace
 
 	bool read_schema_version(sqlite3* _pConnection, int* _pnVersion, std::string* _psError)
 	{
-		// 원본 _read_schema_version(:309~327).
+		// 원본 _read_schema_version(:312~330).
 		{
 			C_STATEMENT Table(_pConnection, u8R"SQL(
         SELECT 1
@@ -255,7 +255,7 @@ namespace
 
 	bool validate_schema_tables(sqlite3* _pConnection, int _nSchemaVersion, std::string* _psError)
 	{
-		// 원본 _validate_schema_tables(:330~353).
+		// 원본 _validate_schema_tables(:333~356).
 		if (_nSchemaVersion == 0) { return(true); }
 
 		C_STATEMENT Names(_pConnection, u8R"SQL(
@@ -283,7 +283,7 @@ namespace
 		}
 		if (Missing.empty()) { return(true); }
 
-		// 원본은 sorted(required - table_names) 라 이름 오름차순이다(:350).
+		// 원본은 sorted(required - table_names) 라 이름 오름차순이다(:353).
 		std::sort(Missing.begin(), Missing.end());
 		std::string sJoined;
 		for (std::size_t i = 0; i < Missing.size(); ++i)
@@ -297,7 +297,7 @@ namespace
 
 	bool validate_foreign_keys(sqlite3* _pConnection, std::string* _psError)
 	{
-		// 원본 _validate_foreign_keys(:356~364).
+		// 원본 _validate_foreign_keys(:359~367).
 		C_STATEMENT Check(_pConnection, u8"PRAGMA foreign_key_check");
 		if (!Check.IsPrepared()) { *_psError = INSPECT_QUERY_FAILED; return(false); }
 
@@ -328,7 +328,7 @@ namespace
 
 	bool validate_card_revision_integrity(sqlite3* _pConnection, std::string* _psError)
 	{
-		// 원본 _validate_card_revision_integrity(:373~414).
+		// 원본 _validate_card_revision_integrity(:376~417).
 		{
 			C_STATEMENT Cards(_pConnection, u8R"SQL(
         SELECT
@@ -358,7 +358,7 @@ namespace
 				const std::string sCardId = column_text(pStmt, 0);
 				const std::string sOwner  = column_text(pStmt, 4);
 
-				// 원본은 row[3] is None 또는 row[4] != row[0] 이면 소유권 오류다(:391).
+				// 원본은 row[3] is None 또는 row[4] != row[0] 이면 소유권 오류다(:394).
 				// 파이썬은 타입이 다르면 값이 같아 보여도 같지 않으므로 타입까지 본다.
 				const bool bOwned = (nRevisionType != SQLITE_NULL)
 					&& (nOwnerType == nCardIdType)
@@ -409,7 +409,7 @@ namespace
 
 	bool validate_capture_counter(sqlite3* _pConnection, std::string* _psError)
 	{
-		// 원본 _validate_capture_counter(:417~430).
+		// 원본 _validate_capture_counter(:420~433).
 		std::int64_t nNextValue = 0;
 		{
 			C_STATEMENT Counter(_pConnection, u8"SELECT next_value FROM counters WHERE name = 'capture'");
@@ -431,7 +431,7 @@ namespace
 		const int nStep = Maximum.Step();
 		if (nStep != SQLITE_ROW) { *_psError = INSPECT_QUERY_FAILED; return(false); }
 
-		// 집계는 항상 한 행이라 원본의 maximum_row is None 갈래는 성립하지 않는다(:426).
+		// 집계는 항상 한 행이라 원본의 maximum_row is None 갈래는 성립하지 않는다(:429).
 		// 값의 타입 검사는 그대로 남는다 - capture_seq 에 정수가 아닌 값이 들어 있으면 걸린다.
 		if (!is_integer(Maximum.Handle(), 0)
 			|| nNextValue <= ::sqlite3_column_int64(Maximum.Handle(), 0))
@@ -444,7 +444,7 @@ namespace
 
 	bool validate_capture_operations(sqlite3* _pConnection, std::string* _psError)
 	{
-		// 원본 _validate_capture_operations(:433~459).
+		// 원본 _validate_capture_operations(:436~462).
 		C_STATEMENT Operations(_pConnection, u8R"SQL(
         SELECT id, original_text, original_hash, original_redacted_at_us
         FROM capture_operations
@@ -490,7 +490,7 @@ namespace
 
 	bool validate_logical_integrity(sqlite3* _pConnection, std::string* _psError)
 	{
-		// 원본 _validate_logical_integrity(:367~370) - 순서까지 계약이다.
+		// 원본 _validate_logical_integrity(:370~373) - 순서까지 계약이다.
 		if (!validate_card_revision_integrity(_pConnection, _psError)) { return(false); }
 		if (!validate_capture_counter(_pConnection, _psError)) { return(false); }
 		return(validate_capture_operations(_pConnection, _psError));
@@ -591,7 +591,7 @@ namespace pynote::core::storage
 
 	bool C_BACKUP_SERVICE::open_read_only_(const std::string& _sPath, sqlite3** _ppConnection)
 	{
-		// 원본 _open_read_only(:527~528) 는 file: URI 에 mode=ro 를 붙인다. 여기서는 같은 뜻의
+		// 원본 _open_read_only(:545~546) 는 file: URI 에 mode=ro 를 붙인다. 여기서는 같은 뜻의
 		// SQLITE_OPEN_READONLY 플래그를 쓴다 - URI 파싱을 거치지 않아 경로 안의 ? 나 # 이
 		// 질의로 해석될 여지도 없다.
 		const int nResult = ::sqlite3_open_v2(_sPath.c_str(), _ppConnection, SQLITE_OPEN_READONLY, nullptr);
@@ -796,16 +796,28 @@ namespace pynote::core::storage
 	}
 
 	std::vector<std::string> C_BACKUP_SERVICE::rollback_preserved_(
+		const std::string&                                      _sDestination,
+		const std::string&                                      _sTemporaryPath,
+		const std::vector<std::string>&                         _ExistingPaths,
 		const std::vector<std::string>&                         _MovedPaths,
 		const std::vector<std::pair<std::string, std::string>>& _PreservedPaths)
 	{
-		// 원본 _restore_preserved_database_set(:496~516). 설치 교체는 복원 절차의 마지막
-		// 연산이라 성공한 뒤 이 롤백이 불리는 상태는 없다 - destination 을 직접 옮기던
-		// 구 1단계 분기는 도달 가능한 유일 상태(첫 비켜두기 실패)에서 원본 DB 를 임시
-		// 이름으로 옮겨 말미 정리가 지우게 했으므로 파이썬 원본과 함께 제거했다.
+		// 원본 _restore_preserved_database_set(:499~534). 게시 롤백은 "우리가 설치한 새
+		// DB"로 확정되는 상태 - 진입 시점에 destination 이 없었는데 지금 존재 - 에서만
+		// 한다(:513~518). 진입 시점 존재를 보지 않던 구 분기는 첫 비켜두기 실패 상태
+		// (destination=원본)에서 원본을 임시 이름으로 옮겨 말미 정리가 지우게 했다.
+		// C++ 에서는 게시 Replace 의 효과와 반환이 원자적이라 이 갈래에 도달할 수 없지만
+		// (파이썬은 시그널 예외가 효과와 기록 사이에 낄 수 있다) 원본과 구조를 맞춘다.
 		std::vector<std::string> Failures;
+		if (!contains_path(_ExistingPaths, _sDestination) && m_FileSystem.Exists(_sDestination))
+		{
+			if (!m_FileSystem.Replace(_sDestination, _sTemporaryPath))
+			{
+				Failures.push_back(_sDestination);
+			}
+		}
 
-		// 옮긴 순서의 역순으로 되돌린다(:505).
+		// 옮긴 순서의 역순으로 되돌린다(:519).
 		for (std::size_t i = _MovedPaths.size(); i > 0; --i)
 		{
 			const std::string& sPath = _MovedPaths[i - 1];
@@ -817,11 +829,15 @@ namespace pynote::core::storage
 			}
 		}
 
-		// 옮기지 못한 자리의 예약 파일은 빈 자리표시자다(:513~515) - 지워서 잔존물을 남기지
-		// 않는다. 옮긴 자리의 예약 파일은 원본 데이터를 들고 있으므로 건드리지 않는다.
+		// 예약 파일은 원본이 아직 제자리에 있을 때만 지운다(:528~533) - 이동 성공과 기록
+		// 사이가 끊기면 기록 없는 예약이 원본을 들고 있으므로 보존한다. 삭제 실패는
+		// 무시한다 - 원본도 기록만 남기고 원래 오류를 보존한다.
 		for (const std::pair<std::string, std::string>& Pair : _PreservedPaths)
 		{
-			if (!contains_path(_MovedPaths, Pair.first)) { m_FileSystem.Remove(Pair.second); }
+			if (!contains_path(_MovedPaths, Pair.first) && m_FileSystem.Exists(Pair.first))
+			{
+				m_FileSystem.Remove(Pair.second);
+			}
 		}
 		return(Failures);
 	}
@@ -869,9 +885,10 @@ namespace pynote::core::storage
 
 		if (bFailed)
 		{
-			// 원본은 원래 예외를 그대로 다시 올리므로(:192) 사유도 파일시스템이 준 것을 쓴다.
+			// 원본은 원래 예외를 그대로 다시 올리므로(:195) 사유도 파일시스템이 준 것을 쓴다.
 			const std::string sOriginalError = m_FileSystem.LastError();
-			const std::vector<std::string> Failures = this->rollback_preserved_(Moved, Preserved);
+			const std::vector<std::string> Failures = this->rollback_preserved_(
+				_sDestination, _sTemporaryPath, _ExistingPaths, Moved, Preserved);
 			if (!Failures.empty())
 			{
 				m_RollbackFailedPaths = Failures;
@@ -882,7 +899,7 @@ namespace pynote::core::storage
 			return(E_BACKUP_RESULT::Failed);
 		}
 
-		// 원본 _discard_preserved_database_set(:519~524) - 지우지 못해도 복원 자체는 성공이다.
+		// 원본 _discard_preserved_database_set(:537~542) - 지우지 못해도 복원 자체는 성공이다.
 		for (const std::pair<std::string, std::string>& Pair : Preserved)
 		{
 			m_FileSystem.Remove(Pair.second);
@@ -903,14 +920,14 @@ namespace pynote::core::storage
 		const E_BACKUP_RESULT eInspected = this->Inspect(_sBackupPath, &Source);
 		if (eInspected != E_BACKUP_RESULT::Ok) { return(eInspected); }
 
-		// 원본 _database_file_set(:479~484) - 문자열을 그대로 이어 붙인 세 경로다.
+		// 원본 _database_file_set(:482~487) - 문자열을 그대로 이어 붙인 세 경로다.
 		const std::string DatabaseSet[3] = {
 			_sDestination,
 			_sDestination + "-wal",
 			_sDestination + "-shm",
 		};
 
-		// 원본 _validate_restore_targets(:487~493) - 아무것도 옮기기 전에 본다.
+		// 원본 _validate_restore_targets(:490~496) - 아무것도 옮기기 전에 본다.
 		for (const std::string& sPath : DatabaseSet)
 		{
 			const bool bSymlink = m_FileSystem.IsSymlink(sPath);
@@ -954,7 +971,7 @@ namespace pynote::core::storage
 			}
 		}
 
-		// 원본의 finally 다(:198~199). 이 시점의 임시 이름은 새 본체가 남긴 것뿐이다 -
+		// 원본의 finally 다(:201~202). 이 시점의 임시 이름은 새 본체가 남긴 것뿐이다 -
 		// 게시를 마쳤으면 이미 없는 이름이고, Create 와 같은 이유로 삭제 실패는 결과를 덮는다.
 		if (!m_FileSystem.Remove(sTemporary)) { return(this->file_system_failed_()); }
 		return(eResult);
@@ -976,7 +993,7 @@ namespace pynote::core::storage
 	bool C_MIGRATION_BACKUP_HOOK::operator()(
 		const std::string& _sDatabasePath, int _nCurrentVersion, int _nLatestVersion)
 	{
-		// 원본 __call__(:215~229). 주입된 디렉터리가 없을 때만 DB 옆의 "backups" 다(:222).
+		// 원본 __call__(:218~232). 주입된 디렉터리가 없을 때만 DB 옆의 "backups" 다(:225).
 		const std::string sDirectory = m_sBackupDirectory.has_value()
 			? *m_sBackupDirectory
 			: join_path(parent_directory(_sDatabasePath), "backups");
@@ -1017,7 +1034,7 @@ namespace pynote::core::storage
 
 	bool C_AUTOMATIC_BACKUP_MANAGER::SetIntervalHours(double _dIntervalHours)
 	{
-		// 원본 set_interval_hours(:249~253). 거절해도 이미 들고 있던 주기는 그대로 둔다 -
+		// 원본 set_interval_hours(:252~256). 거절해도 이미 들고 있던 주기는 그대로 둔다 -
 		// 원본은 ValueError 를 올리고 _interval 에 손대지 않으므로 관리자는 계속 쓸 수 있다.
 		// 생성자가 받은 값이 거절되면 유효한 주기가 한 번도 없으므로 IsValid 가 false 로 남는다.
 		if (!(_dIntervalHours > 0.0))
@@ -1032,7 +1049,7 @@ namespace pynote::core::storage
 
 	bool C_AUTOMATIC_BACKUP_MANAGER::latest_backup_time_(std::int64_t* _pnValueUs) const
 	{
-		// 원본 _latest_backup_time(:269~275) - 패턴은 "{stem}.auto-*.sqlite3" 이고 판정은
+		// 원본 _latest_backup_time(:272~278) - 패턴은 "{stem}.auto-*.sqlite3" 이고 판정은
 		// 파일 이름의 시각이 아니라 가장 최근 **수정 시각**이다. 같은 디렉터리의 pre-migration
 		// 백업은 접두가 달라 주기 판정에 들어오지 않는다.
 		// 와일드카드는 접두/접미 대조로 옮긴다. 원본 Path.glob 은 fnmatch 라 stem 에 대괄호가
@@ -1084,7 +1101,7 @@ namespace pynote::core::storage
 
 		const std::int64_t nNow = m_fnClock();
 
-		// 원본은 기억한 시각이 없을 때만 디스크를 본다(:258).
+		// 원본은 기억한 시각이 없을 때만 디스크를 본다(:261).
 		std::int64_t nLast    = m_nLastBackupAtUs;
 		bool         bHasLast = m_bHasLastBackup;
 		if (!bHasLast) { bHasLast = this->latest_backup_time_(&nLast); }
@@ -1098,7 +1115,7 @@ namespace pynote::core::storage
 		const E_BACKUP_RESULT eResult = m_Service.Create(m_sDatabasePath, sDestination, &Inspection);
 		if (eResult != E_BACKUP_RESULT::Ok)
 		{
-			// 원본은 예외를 그대로 올리므로 마지막 백업 시각을 갱신하지 않는다(:265~266).
+			// 원본은 예외를 그대로 올리므로 마지막 백업 시각을 갱신하지 않는다(:268~269).
 			m_sLastError = m_Service.LastError();
 			return(eResult);
 		}
@@ -1118,7 +1135,7 @@ namespace pynote::core::storage
 		: m_pConnection(_pConnection)
 		, m_fnClock(std::move(_fnClock))
 	{
-		// 원본 __init__(:288~293).
+		// 원본 __init__(:291~296).
 		if (_dIntervalHours > 0.0)
 		{
 			m_dIntervalSeconds = _dIntervalHours * 60.0 * 60.0;
@@ -1138,7 +1155,7 @@ namespace pynote::core::storage
 			return(E_QUICK_CHECK_RESULT::Failed);
 		}
 
-		// 원본 run_if_due(:295~306).
+		// 원본 run_if_due(:298~309).
 		const double dNow = m_fnClock();
 		if (!_bForce && m_bHasLastCheck && (dNow - m_dLastCheckAt) < m_dIntervalSeconds)
 		{
@@ -1148,7 +1165,7 @@ namespace pynote::core::storage
 		std::string sError;
 		if (!RunQuickCheck(m_pConnection, &sError))
 		{
-			// 원본은 예외를 올리므로 마지막 검사 시각을 갱신하지 않는다(:304~305).
+			// 원본은 예외를 올리므로 마지막 검사 시각을 갱신하지 않는다(:307~308).
 			m_sLastError = sError;
 			return(E_QUICK_CHECK_RESULT::Failed);
 		}

@@ -81,7 +81,7 @@ namespace
 	}
 
 	// 복원 대상 세트를 알아볼 수 있는 바이트로 채운다. 파이썬 시험이 쓰는 방식 그대로다
-	// (tests/integration/test_backup.py:333~335, :356~358).
+	// (tests/integration/test_backup.py:335~337, :358~360).
 	void write_original_set(const std::string& _sDestination)
 	{
 		write_bytes(_sDestination, "original database");
@@ -194,7 +194,7 @@ TEST_CASE("손상된 백업으로는 복원하지 않고 대상도 건드리지 
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_restore_rejects_sidecar_directory_before_database_set_changes
-// (backup.py 의 _validate_restore_targets :487~493).
+// (backup.py 의 _validate_restore_targets :490~496).
 TEST_CASE("복원 대상 세트에 일반 파일이 아닌 경로가 있으면 아무것도 옮기기 전에 거절한다", "[core][storage][backup]")
 {
 	C_TEMP_TREE               Tree("restore_sidecar_directory");
@@ -270,7 +270,7 @@ TEST_CASE("복원 대상 세트의 심볼릭 링크는 거절한다", "[core][st
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_restore_rolls_back_database_set_when_publish_fails
-// (backup.py 의 :177~192 와 _restore_preserved_database_set :496~516).
+// (backup.py 의 :175~195 와 _restore_preserved_database_set :499~534).
 TEST_CASE("게시가 실패하면 원본 DB 세트를 통째로 되돌린다", "[core][storage][backup]")
 {
 	C_TEMP_TREE               Tree("restore_rollback");
@@ -309,7 +309,7 @@ TEST_CASE("게시가 실패하면 원본 DB 세트를 통째로 되돌린다", "
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_restore_keeps_original_database_when_first_move_aside_fails
-// (backup.py 의 _restore_preserved_database_set :496~516 와 finally :199). 구 롤백 1단계 분기는
+// (backup.py 의 _restore_preserved_database_set :499~534 와 finally :202). 구 롤백 1단계 분기는
 // 정확히 이 상태에서 원본 DB 를 임시 이름으로 옮겨 말미 정리가 지우게 했다 - W1 계약 대장 §6-1
 // 이 지목한 데이터 손실 경로였고, 제품 판단으로 파이썬 원본과 함께 제거했다.
 TEST_CASE("첫 비켜두기가 실패해도 원본 DB 세트는 제자리에 남는다", "[core][storage][backup]")
@@ -352,7 +352,7 @@ TEST_CASE("첫 비켜두기가 실패해도 원본 DB 세트는 제자리에 남
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_temporary_database_path_reserves_name_until_replaced
-// (backup.py 의 _temporary_database_path :531~540 - 배타 생성한 0바이트 예약 파일을 남긴다).
+// (backup.py 의 _temporary_database_path :549~558 - 배타 생성한 0바이트 예약 파일을 남긴다).
 TEST_CASE("임시 이름 예약은 파일로 남아 원자 교체의 대상이 된다", "[core][storage][backup]")
 {
 	C_TEMP_TREE                   Tree("temporary_reservation");
@@ -374,8 +374,52 @@ TEST_CASE("임시 이름 예약은 파일로 남아 원자 교체의 대상이 �
 	REQUIRE(read_bytes(sFirst) == "payload");
 }
 
-// 대응 원본: backup.py 의 restore_database (:184~191 - 롤백까지 실패하면 원래 실패와 다른 오류다)
-// 와 _restore_preserved_database_set 의 실패 경로 보고(:503~516).
+// 대응 원본: tests/integration/test_backup.py::test_reservation_cleanup_failure_keeps_original_error
+// (backup.py 의 _restore_preserved_database_set :528~533 - 예약 정리 실패는 기록만 남기고
+// 원래 오류를 보존한다. 이식본은 Remove 실패를 무시해 같은 계약을 지킨다).
+TEST_CASE("예약 파일 정리 실패는 원래 오류를 가리지 않는다", "[core][storage][backup]")
+{
+	C_TEMP_TREE               Tree("restore_cleanup_failure");
+	C_PROBE_FILE_SYSTEM       FileSystem;
+	storage::C_BACKUP_SERVICE Service(FileSystem);
+
+	const std::string sSource      = Tree.Child("source.sqlite3");
+	const std::string sBackup      = Tree.Child("backup.sqlite3");
+	const std::string sDestination = Tree.Child("live.sqlite3");
+	seed_database(sSource);
+
+	storage::S_BACKUP_INSPECTION Created;
+	REQUIRE(Service.Create(sSource, sBackup, &Created) == storage::E_BACKUP_RESULT::Ok);
+	write_original_set(sDestination);
+
+	// 첫 비켜두기 교체를 실패시키고, -wal 자리의 예약 파일 삭제도 실패시킨다.
+	int nReplaceCalls = 0;
+	FileSystem.fnFailReplace = [&nReplaceCalls](const std::string&, const std::string&)
+		{
+			++nReplaceCalls;
+			return(nReplaceCalls == 1);
+		};
+	FileSystem.fnFailRemove = [](const std::string& _sPath)
+		{
+			return(_sPath.find("-wal.") != std::string::npos);
+		};
+
+	storage::S_BACKUP_INSPECTION Restored;
+	REQUIRE(Service.Restore(sBackup, sDestination, true, &Restored) == storage::E_BACKUP_RESULT::Failed);
+
+	// 정리 실패는 롤백 판정도 오류 종류도 바꾸지 않는다 - 원래 오류가 그대로 나간다.
+	REQUIRE(Service.RollbackFailedPaths().empty());
+	REQUIRE(contains(Service.LastError(), "주입한 교체 실패"));
+
+	// 원본 세트는 제자리에 남고, 지우지 못한 -wal 예약 파일 하나만 잔존한다.
+	REQUIRE(read_bytes(sDestination) == "original database");
+	REQUIRE(read_bytes(sDestination + "-wal") == "original wal");
+	REQUIRE(read_bytes(sDestination + "-shm") == "original shm");
+	REQUIRE_FALSE(FileSystem.NoTemporaryLeftBehind());
+}
+
+// 대응 원본: backup.py 의 restore_database (:187~194 - 롤백까지 실패하면 원래 실패와 다른 오류다)
+// 와 _restore_preserved_database_set 의 실패 경로 보고(:507~534).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("롤백까지 실패하면 되돌리지 못한 경로를 달고 다른 오류로 보고한다", "[core][storage][backup]")
 {

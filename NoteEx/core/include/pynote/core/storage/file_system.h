@@ -9,10 +9,10 @@
 namespace pynote::core::storage
 {
 	// 백업 계층이 파일을 만지는 유일한 통로다. 파이썬 원본 infrastructure/backup.py 가 실제로
-	// 부르는 연산만 담는다 - Path.exists(:113 :150), Path.is_file(:74 :111 :490),
-	// Path.is_symlink(:489 :490), Path.mkdir(parents=True, exist_ok=True)(:115 :154),
-	// os.replace(:128 :176 :178 :507), Path.unlink(missing_ok=True)(:137 :199 :515 :522),
-	// tempfile.mkstemp + close(:531~540), Path.stat().st_mtime(:274), Path.glob(:271).
+	// 부르는 연산만 담는다 - Path.exists(:113 :150 :513 :529), Path.is_file(:74 :111 :493),
+	// Path.is_symlink(:492 :493), Path.mkdir(parents=True, exist_ok=True)(:115 :154),
+	// os.replace(:128 :176 :178 :515 :521), Path.unlink(missing_ok=True)(:137 :202 :531 :540),
+	// tempfile.mkstemp + close(:549~558), Path.stat().st_mtime(:277), Path.glob(:274).
 	// 호출부가 쓰지 않는 연산은 넣지 않는다 - 호출부보다 넓은 파일시스템 추상은 부채다.
 	//
 	// 원자적 교체(Replace)의 구현은 파이썬 os.replace 의 Windows 실측 동작을 따라야 한다.
@@ -44,7 +44,7 @@ namespace pynote::core::storage
 		// Path.unlink(missing_ok=True). 대상이 없으면 성공이다.
 		virtual bool Remove(const std::string& _sPath) = 0;
 
-		// tempfile.mkstemp(prefix, suffix, dir) 뒤의 close 까지가 한 연산이다(:531~540).
+		// tempfile.mkstemp(prefix, suffix, dir) 뒤의 close 까지가 한 연산이다(:549~558).
 		// 배타 생성한 0바이트 예약 파일을 남겨 이름 재사용 경쟁을 막는다. 쓰지 않은
 		// 예약 파일의 정리는 호출부 책임이다.
 		virtual bool CreateUniqueTemporaryPath(
@@ -54,7 +54,7 @@ namespace pynote::core::storage
 			std::string*       _psPath) = 0;
 
 		// Path.stat().st_mtime 를 epoch 마이크로초로 돌려준다. 원본이 그 값을 datetime 으로
-		// 바꿔 쓰므로(:275) 계약상 정밀도는 마이크로초다.
+		// 바꿔 쓰므로(:278) 계약상 정밀도는 마이크로초다.
 		virtual bool ModifiedTimeUs(const std::string& _sPath, std::int64_t* _pnValueUs) const = 0;
 
 		// Path.glob 의 자리다. 와일드카드 판정은 core 가 하고 여기서는 이름만 나열한다 -

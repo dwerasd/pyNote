@@ -73,7 +73,7 @@ TEST_CASE("quick_check 가 손상을 보고하면 그 문구를 달고 거절한
 	REQUIRE(contains(Fixture.Service().LastError(), "SQLite 무결성 검사에 실패했습니다:"));
 }
 
-// 대응 원본: backup.py 의 _read_schema_version (:316~318).
+// 대응 원본: backup.py 의 _read_schema_version (:319~321).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("schema_version 테이블이 없는 백업은 거절한다", "[core][storage][backup]")
 {
@@ -86,7 +86,7 @@ TEST_CASE("schema_version 테이블이 없는 백업은 거절한다", "[core][s
 	REQUIRE(contains(Fixture.Service().LastError(), "pyNote schema_version이 없는 백업입니다."));
 }
 
-// 대응 원본: backup.py 의 _read_schema_version (:319~323).
+// 대응 원본: backup.py 의 _read_schema_version (:322~326).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("schema_version 행이 없는 백업은 거절한다", "[core][storage][backup]")
 {
@@ -99,7 +99,7 @@ TEST_CASE("schema_version 행이 없는 백업은 거절한다", "[core][storage
 	REQUIRE(contains(Fixture.Service().LastError(), "백업의 schema version 행이 없습니다."));
 }
 
-// 대응 원본: backup.py 의 _read_schema_version (:324~326 - type(value) is not int).
+// 대응 원본: backup.py 의 _read_schema_version (:327~329 - type(value) is not int).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("schema version 이 정수가 아닌 백업은 거절한다", "[core][storage][backup]")
 {
@@ -131,7 +131,7 @@ TEST_CASE("앱보다 새로운 schema version 은 지원하지 않는 백업으�
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_incomplete_current_schema_is_rejected_before_destination_changes
-// (backup.py 의 _validate_schema_tables :330~353).
+// (backup.py 의 _validate_schema_tables :333~356).
 TEST_CASE("필수 테이블이 빠진 백업은 빠진 이름을 달고 거절한다", "[core][storage][backup]")
 {
 	C_INSPECTION_FIXTURE Fixture("inspect_incomplete");
@@ -192,7 +192,7 @@ TEST_CASE("v3 백업은 workspace_state 를 요구하고 받아들인다", "[cor
 }
 
 // 대응 원본: tests/integration/test_backup.py::test_dangling_foreign_key_backup_is_rejected_before_destination_changes
-// (backup.py 의 _validate_foreign_keys :356~364).
+// (backup.py 의 _validate_foreign_keys :359~367).
 TEST_CASE("FK 무결성이 깨진 백업은 표본을 달고 거절한다", "[core][storage][backup]")
 {
 	C_INSPECTION_FIXTURE Fixture("inspect_dangling_fk");
@@ -209,7 +209,7 @@ TEST_CASE("FK 무결성이 깨진 백업은 표본을 달고 거절한다", "[co
 	REQUIRE(contains(Fixture.Service().LastError(), "cards rowid="));
 }
 
-// 대응 원본: backup.py 의 _validate_card_revision_integrity (:391~394 - 현재 리비전 소유권).
+// 대응 원본: backup.py 의 _validate_card_revision_integrity (:394~397 - 현재 리비전 소유권).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("현재 리비전이 비어 있는 카드는 소유권 오류로 거절한다", "[core][storage][backup]")
 {
@@ -224,7 +224,7 @@ TEST_CASE("현재 리비전이 비어 있는 카드는 소유권 오류로 거�
 	REQUIRE(contains(Fixture.Service().LastError(), "카드 card-0의 현재 리비전 소유권이 올바르지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_card_revision_integrity (:402~405 - 본문/해시 일치).
+// 대응 원본: backup.py 의 _validate_card_revision_integrity (:405~408 - 본문/해시 일치).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("카드 본문이 현재 리비전과 다르면 거절한다", "[core][storage][backup]")
 {
@@ -242,7 +242,7 @@ TEST_CASE("카드 본문이 현재 리비전과 다르면 거절한다", "[core]
 	REQUIRE(contains(Fixture.Service().LastError(), "카드 card-1의 본문과 현재 리비전이 일치하지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_text_hash (:468~471 - SHA-256 재계산).
+// 대응 원본: backup.py 의 _validate_text_hash (:471~474 - SHA-256 재계산).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("본문과 저장된 해시가 어긋나면 재계산으로 잡아 거절한다", "[core][storage][backup]")
 {
@@ -262,7 +262,7 @@ TEST_CASE("본문과 저장된 해시가 어긋나면 재계산으로 잡아 거
 	REQUIRE(contains(Fixture.Service().LastError(), "카드 card-2의 SHA-256 해시가 일치하지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_capture_counter (:417~430).
+// 대응 원본: backup.py 의 _validate_capture_counter (:420~433).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("capture 카운터가 이미 발급한 순번보다 크지 않으면 거절한다", "[core][storage][backup]")
 {
@@ -280,7 +280,7 @@ TEST_CASE("capture 카운터가 이미 발급한 순번보다 크지 않으면 �
 		"capture 카운터가 이미 발급된 capture_seq보다 크지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_capture_operations (:443~446 - 원문/해시 쌍).
+// 대응 원본: backup.py 의 _validate_capture_operations (:446~449 - 원문/해시 쌍).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("입력 작업의 원문과 해시가 짝을 이루지 않으면 거절한다", "[core][storage][backup]")
 {
@@ -296,7 +296,7 @@ TEST_CASE("입력 작업의 원문과 해시가 짝을 이루지 않으면 거�
 		"입력 작업 operation-1의 원문과 해시 쌍이 일치하지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_capture_operations (:447~452 - redact 마커).
+// 대응 원본: backup.py 의 _validate_capture_operations (:450~455 - redact 마커).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("원문이 남아 있는데 redact 마커가 찍혀 있으면 거절한다", "[core][storage][backup]")
 {
@@ -313,7 +313,7 @@ TEST_CASE("원문이 남아 있는데 redact 마커가 찍혀 있으면 거절�
 		"입력 작업 operation-1의 redact 마커가 올바르지 않습니다."));
 }
 
-// 대응 원본: backup.py 의 _validate_capture_operations (:447~452 - 소거를 마친 정상 상태).
+// 대응 원본: backup.py 의 _validate_capture_operations (:450~455 - 소거를 마친 정상 상태).
 // 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
 TEST_CASE("원문을 지우고 마커만 남긴 입력 작업은 받아들인다", "[core][storage][backup]")
 {
