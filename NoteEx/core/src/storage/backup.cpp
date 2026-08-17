@@ -796,29 +796,16 @@ namespace pynote::core::storage
 	}
 
 	std::vector<std::string> C_BACKUP_SERVICE::rollback_preserved_(
-		const std::string&                                      _sDestination,
-		const std::string&                                      _sTemporaryPath,
 		const std::vector<std::string>&                         _MovedPaths,
 		const std::vector<std::pair<std::string, std::string>>& _PreservedPaths)
 	{
-		// 원본 _restore_preserved_database_set(:496~516).
+		// 원본 _restore_preserved_database_set(:496~516). 설치 교체는 복원 절차의 마지막
+		// 연산이라 성공한 뒤 이 롤백이 불리는 상태는 없다 - destination 을 직접 옮기던
+		// 구 1단계 분기는 도달 가능한 유일 상태(첫 비켜두기 실패)에서 원본 DB 를 임시
+		// 이름으로 옮겨 말미 정리가 지우게 했으므로 파이썬 원본과 함께 제거했다.
 		std::vector<std::string> Failures;
 
-		// CEILING: 이 1단계 분기는 원본의 알려진 데이터 손실 경로를 그대로 재현한다. 세 조건이
-		// 함께 서면(대상 DB 가 존재했고, 첫 비켜두기 교체가 실패해 옮긴 것이 없고, 여기의 교체가
-		// 성공하면) 원본 DB 가 임시 이름으로 옮겨진 채 롤백은 성공으로 판정되고, 뒤이은 정리가
-		// 그 임시 이름을 지운다 - 보존본도 없다. 겉보기 의도("게시한 새 DB 를 되돌린다")에
-		// 해당하는 상태는 도달 불가라 이 분기는 해로운 경우에만 돈다. 고치는 것은 이식 판단이
-		// 아니라 제품 판단이므로 여기서는 조건식을 문자 그대로 옮긴다(계약 대장 §6-1).
-		if (!contains_path(_MovedPaths, _sDestination) && m_FileSystem.Exists(_sDestination))
-		{
-			if (!m_FileSystem.Replace(_sDestination, _sTemporaryPath))
-			{
-				Failures.push_back(_sDestination);
-			}
-		}
-
-		// 옮긴 순서의 역순으로 되돌린다(:510).
+		// 옮긴 순서의 역순으로 되돌린다(:505).
 		for (std::size_t i = _MovedPaths.size(); i > 0; --i)
 		{
 			const std::string& sPath = _MovedPaths[i - 1];
@@ -828,6 +815,13 @@ namespace pynote::core::storage
 				if (!m_FileSystem.Replace(Pair.second, sPath)) { Failures.push_back(sPath); }
 				break;
 			}
+		}
+
+		// 옮기지 못한 자리의 예약 파일은 빈 자리표시자다(:513~515) - 지워서 잔존물을 남기지
+		// 않는다. 옮긴 자리의 예약 파일은 원본 데이터를 들고 있으므로 건드리지 않는다.
+		for (const std::pair<std::string, std::string>& Pair : _PreservedPaths)
+		{
+			if (!contains_path(_MovedPaths, Pair.first)) { m_FileSystem.Remove(Pair.second); }
 		}
 		return(Failures);
 	}
@@ -843,8 +837,8 @@ namespace pynote::core::storage
 		if (eInspected != E_BACKUP_RESULT::Ok) { return(eInspected); }
 		*_pnSchemaVersion = Restored.nSchemaVersion;
 
-		// 비켜 둘 이름은 옮기기 전에 전부 만든다(:169~171). 여기서 실패하면 아직 아무것도
-		// 움직이지 않았으므로 롤백 대상이 없다.
+		// 비켜 둘 이름은 옮기기 전에 전부 만든다(:173~174). 여기서 실패하면 아직 아무것도
+		// 옮기지 않았으므로 이미 만든 예약 파일만 지우고 물러난다.
 		std::vector<std::pair<std::string, std::string>> Preserved;
 		for (const std::string& sPath : _ExistingPaths)
 		{
@@ -852,7 +846,14 @@ namespace pynote::core::storage
 			if (!m_FileSystem.CreateUniqueTemporaryPath(
 				parent_directory(sPath), temporary_prefix(sPath), ".tmp", &sPreserved))
 			{
-				return(this->file_system_failed_());
+				// Remove 가 LastError 를 덮으므로 실패 사유를 먼저 잡아 둔다.
+				const std::string sError = m_FileSystem.LastError();
+				for (const std::pair<std::string, std::string>& Pair : Preserved)
+				{
+					m_FileSystem.Remove(Pair.second);
+				}
+				this->set_error_(sError);
+				return(E_BACKUP_RESULT::Failed);
 			}
 			Preserved.emplace_back(sPath, sPreserved);
 		}
@@ -870,8 +871,7 @@ namespace pynote::core::storage
 		{
 			// 원본은 원래 예외를 그대로 다시 올리므로(:192) 사유도 파일시스템이 준 것을 쓴다.
 			const std::string sOriginalError = m_FileSystem.LastError();
-			const std::vector<std::string> Failures =
-				this->rollback_preserved_(_sDestination, _sTemporaryPath, Moved, Preserved);
+			const std::vector<std::string> Failures = this->rollback_preserved_(Moved, Preserved);
 			if (!Failures.empty())
 			{
 				m_RollbackFailedPaths = Failures;
@@ -954,17 +954,8 @@ namespace pynote::core::storage
 			}
 		}
 
-		// 원본의 finally 다(:198~199). 롤백이 새 본체를 이 이름으로 되돌려 놓았을 수도 있다.
-		// Create 와 같은 이유로 삭제 실패는 결과를 덮는다.
-		//
-		// CEILING: 원본의 데이터 손실 경로를 그대로 재현한다. destination 이 있었고 첫
-		// 이동이 실패해 moved 가 비었는데 롤백 1단계 이동만 성공하면, 실패 목록이 비어
-		// 원래 오류가 나가고 여기서 지우는 것이 그 자리에 옮겨진 원본 데이터베이스다.
-		// 보존본도 없다. MODE A 라 고치지 않는다 - 수정은 이식 판단이 아니라 제품 판단이고
-		// 전환 기간에 파이썬 앱과 동작이 갈리면 그쪽이 더 나쁘다. 상향 경로는 파이썬 원본과
-		// 이식본을 함께 고치는 것이다.
-		// 같은 결함의 반대쪽 끝이다 - 원본을 임시 이름으로 옮기는 분기는 rollback_preserved_
-		// 에 있고 그쪽에도 같은 표시가 있다. 둘은 별개 결함이 아니라 한 경로다(계약 대장 §6-1).
+		// 원본의 finally 다(:198~199). 이 시점의 임시 이름은 새 본체가 남긴 것뿐이다 -
+		// 게시를 마쳤으면 이미 없는 이름이고, Create 와 같은 이유로 삭제 실패는 결과를 덮는다.
 		if (!m_FileSystem.Remove(sTemporary)) { return(this->file_system_failed_()); }
 		return(eResult);
 	}

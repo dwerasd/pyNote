@@ -308,13 +308,13 @@ TEST_CASE("게시가 실패하면 원본 DB 세트를 통째로 되돌린다", "
 	REQUIRE(FileSystem.NoTemporaryLeftBehind());
 }
 
-// 대응 원본: backup.py 의 _restore_preserved_database_set 1단계 분기(:504~509) 와 그에 이어지는
-// finally(:199). **이 시험은 바람직한 동작이 아니라 원본의 실제 동작을 기록한다** - 계약 대장
-// §6-1 이 이 파일의 유일한 데이터 손실 경로로 지목한 자리이고, MODE A 라 고치지 않고 옮겼다.
-// 파이썬 시험 트리에 대응 케이스가 없어 pytest node ID 는 W0 T4 역보강 대기다.
-TEST_CASE("첫 비켜두기가 실패하고 롤백 1단계가 성공하면 원본 DB 가 사라진다", "[core][storage][backup]")
+// 대응 원본: tests/integration/test_backup.py::test_restore_keeps_original_database_when_first_move_aside_fails
+// (backup.py 의 _restore_preserved_database_set :496~516 와 finally :199). 구 롤백 1단계 분기는
+// 정확히 이 상태에서 원본 DB 를 임시 이름으로 옮겨 말미 정리가 지우게 했다 - W1 계약 대장 §6-1
+// 이 지목한 데이터 손실 경로였고, 제품 판단으로 파이썬 원본과 함께 제거했다.
+TEST_CASE("첫 비켜두기가 실패해도 원본 DB 세트는 제자리에 남는다", "[core][storage][backup]")
 {
-	C_TEMP_TREE               Tree("restore_stage1_data_loss");
+	C_TEMP_TREE               Tree("restore_stage1_keeps_original");
 	C_PROBE_FILE_SYSTEM       FileSystem;
 	storage::C_BACKUP_SERVICE Service(FileSystem);
 
@@ -327,8 +327,8 @@ TEST_CASE("첫 비켜두기가 실패하고 롤백 1단계가 성공하면 원�
 	REQUIRE(Service.Create(sSource, sBackup, &Created) == storage::E_BACKUP_RESULT::Ok);
 	write_original_set(sDestination);
 
-	// 도달 조건은 셋이다: 대상이 존재하고, 첫 비켜두기 교체가 실패해 옮긴 것이 없고,
-	// 롤백 1단계의 교체는 성공한다. 첫 교체 하나만 실패시키면 정확히 그 상태가 된다.
+	// 구 분기의 도달 조건이던 상태 그대로다: 대상이 존재하고 첫 비켜두기 교체가 실패해
+	// 옮긴 것이 없다. 첫 교체 하나만 실패시키면 정확히 그 상태가 된다.
 	int nReplaceCalls = 0;
 	FileSystem.fnFailReplace = [&nReplaceCalls](const std::string&, const std::string&)
 		{
@@ -339,18 +339,39 @@ TEST_CASE("첫 비켜두기가 실패하고 롤백 1단계가 성공하면 원�
 	storage::S_BACKUP_INSPECTION Restored;
 	REQUIRE(Service.Restore(sBackup, sDestination, true, &Restored) == storage::E_BACKUP_RESULT::Failed);
 
-	// 롤백은 "성공"으로 판정된다 - 되돌리지 못한 경로가 없으므로 오류 종류도 바뀌지 않는다.
+	// 옮긴 것이 없으므로 롤백은 빈 성공이고 원래 오류가 그대로 나간다.
 	REQUIRE(Service.RollbackFailedPaths().empty());
 	REQUIRE(contains(Service.LastError(), "주입한 교체 실패"));
 
-	// 그리고 이것이 그 판정의 대가다. 롤백 1단계가 원본 DB 를 임시 이름으로 옮겼고
-	// 정리가 그 이름을 지웠다. 보존본은 만들어진 적이 없다.
-	REQUIRE_FALSE(FileSystem.Exists(sDestination));
-	REQUIRE(FileSystem.NoTemporaryLeftBehind());
-
-	// 사이드카는 첫 원소에서 루프가 끊겨 손대지 않은 채 남는다 - 본체만 사라진다.
+	// 원본 세트 세 파일 전부 원래 자리에 원래 바이트로 남고, 비켜두기 예약 파일과
+	// 새 본체 임시 파일도 남지 않는다.
+	REQUIRE(read_bytes(sDestination) == "original database");
 	REQUIRE(read_bytes(sDestination + "-wal") == "original wal");
 	REQUIRE(read_bytes(sDestination + "-shm") == "original shm");
+	REQUIRE(FileSystem.NoTemporaryLeftBehind());
+}
+
+// 대응 원본: tests/integration/test_backup.py::test_temporary_database_path_reserves_name_until_replaced
+// (backup.py 의 _temporary_database_path :531~540 - 배타 생성한 0바이트 예약 파일을 남긴다).
+TEST_CASE("임시 이름 예약은 파일로 남아 원자 교체의 대상이 된다", "[core][storage][backup]")
+{
+	C_TEMP_TREE                   Tree("temporary_reservation");
+	platform::C_WIN32_FILE_SYSTEM FileSystem;
+
+	std::string sFirst;
+	std::string sSecond;
+	REQUIRE(FileSystem.CreateUniqueTemporaryPath(Tree.Utf8(), ".live.sqlite3.", ".tmp", &sFirst));
+	REQUIRE(FileSystem.CreateUniqueTemporaryPath(Tree.Utf8(), ".live.sqlite3.", ".tmp", &sSecond));
+
+	// 예약 파일이 남아 있는 동안 배타 생성은 같은 이름을 다시 내줄 수 없다.
+	REQUIRE(sFirst != sSecond);
+	REQUIRE(FileSystem.Exists(sFirst));
+	REQUIRE(FileSystem.Exists(sSecond));
+
+	// 닫힌 0바이트 예약 파일은 원자 교체의 대상이 된다 - 공유 위반은 열린 핸들의 성질이다.
+	write_bytes(Tree.Child("payload.bin"), "payload");
+	REQUIRE(FileSystem.Replace(Tree.Child("payload.bin"), sFirst));
+	REQUIRE(read_bytes(sFirst) == "payload");
 }
 
 // 대응 원본: backup.py 의 restore_database (:184~191 - 롤백까지 실패하면 원래 실패와 다른 오류다)

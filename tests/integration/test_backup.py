@@ -97,6 +97,8 @@ def test_backup_restore_round_trip_preserves_cards_revisions_and_sequences(
     restore_database(backup_path, database_path, overwrite=True)
 
     assert _content_snapshot(database_path) == expected
+    # 성공 경로에서도 임시 본체와 비켜두기 예약 파일이 남지 않는다.
+    assert not tuple(tmp_path.glob("*.tmp"))
 
 
 def test_backup_restore_preserves_existing_extended_whitespace_card_exactly(
@@ -374,6 +376,65 @@ def test_restore_rolls_back_database_set_when_publish_fails(
     assert destination.read_bytes() == b"original database"
     assert wal_path.read_bytes() == b"original wal"
     assert shm_path.read_bytes() == b"original shm"
+
+
+def test_restore_keeps_original_database_when_first_move_aside_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.sqlite3"
+    backup_path = tmp_path / "backup.sqlite3"
+    destination = tmp_path / "live.sqlite3"
+    wal_path = Path(f"{destination}-wal")
+    shm_path = Path(f"{destination}-shm")
+    _seed_database(source)
+    create_database_backup(source, backup_path)
+    destination.write_bytes(b"original database")
+    wal_path.write_bytes(b"original wal")
+    shm_path.write_bytes(b"original shm")
+    real_replace = backup_module.os.replace
+    calls = 0
+
+    def fail_first_move_aside(source_path: Path, destination_path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("비켜두기 실패 주입")
+        real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(backup_module.os, "replace", fail_first_move_aside)
+
+    with pytest.raises(OSError, match="비켜두기 실패 주입"):
+        restore_database(backup_path, destination, overwrite=True)
+
+    # 구 롤백 1단계 분기는 정확히 이 상태에서 원본 DB 를 임시 이름으로 옮겨
+    # finally 가 지우게 했다. 이제 원본 세트는 제자리에 남고 예약 파일도 남지 않는다.
+    assert calls == 1
+    assert destination.read_bytes() == b"original database"
+    assert wal_path.read_bytes() == b"original wal"
+    assert shm_path.read_bytes() == b"original shm"
+    assert not tuple(tmp_path.glob("*.tmp"))
+
+
+def test_temporary_database_path_reserves_name_until_replaced(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "live.sqlite3"
+
+    first = backup_module._temporary_database_path(destination)
+    second = backup_module._temporary_database_path(destination)
+
+    # 예약 파일이 남아 있는 동안 배타 생성은 같은 이름을 다시 내줄 수 없다.
+    assert first != second
+    assert first.is_file()
+    assert second.is_file()
+    assert first.parent == destination.parent
+
+    # 예약 파일은 os.replace 의 대상이 된다 - 비켜두기가 그 위로 교체한다.
+    payload = tmp_path / "payload.bin"
+    payload.write_bytes(b"payload")
+    backup_module.os.replace(payload, first)
+    assert first.read_bytes() == b"payload"
 
 
 def test_dangling_foreign_key_backup_is_rejected_before_destination_changes(

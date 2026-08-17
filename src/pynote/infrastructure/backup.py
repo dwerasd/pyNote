@@ -166,18 +166,18 @@ def restore_database(
         finally:
             source_connection.close()
         restored = inspect_backup(temporary_path)
-        preserved_paths = {
-            path: _temporary_database_path(path) for path in existing_paths
-        }
         try:
+            # 비켜 둘 예약 파일 생성부터 롤백 범위에 넣는다 - 여기서 실패해도
+            # 이미 만든 예약 파일(아직 빈 자리표시자)을 롤백이 지워 잔존물을
+            # 남기지 않는다.
+            for path in existing_paths:
+                preserved_paths[path] = _temporary_database_path(path)
             for path in existing_paths:
                 os.replace(path, preserved_paths[path])
                 moved_paths.append(path)
             os.replace(temporary_path, destination)
         except BaseException as error:
             rollback_errors = _restore_preserved_database_set(
-                destination=destination,
-                temporary_path=temporary_path,
                 moved_paths=moved_paths,
                 preserved_paths=preserved_paths,
             )
@@ -495,24 +495,24 @@ def _validate_restore_targets(paths: tuple[Path, ...]) -> None:
 
 def _restore_preserved_database_set(
     *,
-    destination: Path,
-    temporary_path: Path,
     moved_paths: list[Path],
     preserved_paths: dict[Path, Path],
 ) -> tuple[Path, ...]:
+    # 설치 교체는 복원 절차의 마지막 연산이라 성공한 뒤 이 롤백이 불리는 상태는 없다.
+    # destination 을 직접 옮기던 구 1단계 분기는 도달 가능한 유일 상태(첫 비켜두기
+    # 실패)에서 원본 DB 를 임시 이름으로 옮겨 finally 삭제에 넘겼으므로 제거했다.
     failed_paths: list[Path] = []
-    if destination not in moved_paths and destination.exists():
-        try:
-            os.replace(destination, temporary_path)
-        except OSError:
-            LOGGER.exception("새 복원 DB를 롤백하지 못했습니다: %s", destination)
-            failed_paths.append(destination)
     for path in reversed(moved_paths):
         try:
             os.replace(preserved_paths[path], path)
         except OSError:
             LOGGER.exception("보존한 원본 DB 파일을 복구하지 못했습니다: %s", path)
             failed_paths.append(path)
+    # 옮기지 못한 자리의 예약 파일은 빈 자리표시자다 - 지워서 잔존물을 남기지
+    # 않는다. 옮긴 자리의 예약 파일은 원본 데이터를 들고 있으므로 건드리지 않는다.
+    for path, placeholder in preserved_paths.items():
+        if path not in moved_paths:
+            placeholder.unlink(missing_ok=True)
     return tuple(failed_paths)
 
 
@@ -535,6 +535,6 @@ def _temporary_database_path(destination: Path) -> Path:
         dir=destination.parent,
     )
     os.close(descriptor)
-    path = Path(name)
-    path.unlink()
-    return path
+    # 배타 생성한 0바이트 파일을 남겨 예약을 유지한다 - 지우고 이름만 돌려주면 반환과
+    # 사용 사이에 같은 이름이 다시 할당될 수 있다. 쓰지 않은 예약은 각 경로가 지운다.
+    return Path(name)

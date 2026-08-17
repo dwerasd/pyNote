@@ -132,10 +132,9 @@ namespace pynote::core::storage
 			const std::string&              _sTemporaryPath,
 			int*                            _pnSchemaVersion);
 
-		// 원본 _restore_preserved_database_set(:496) 이식. 되돌리지 못한 경로를 돌려준다.
+		// 원본 _restore_preserved_database_set(:496) 이식. 되돌리지 못한 경로를 돌려주고,
+		// 옮기지 못한 자리의 예약 파일을 지운다.
 		std::vector<std::string> rollback_preserved_(
-			const std::string&                                            _sDestination,
-			const std::string&                                            _sTemporaryPath,
 			const std::vector<std::string>&                               _MovedPaths,
 			const std::vector<std::pair<std::string, std::string>>&       _PreservedPaths);
 
