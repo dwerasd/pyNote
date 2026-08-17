@@ -510,7 +510,7 @@ class CardStreamView(QListView):
         open_action = menu.addAction("편집기에서 열기")
         copy_action = menu.addAction("본문 복사")
         export_action = menu.addAction("파일로 내보내기")
-        delete_action = menu.addAction("삭제")
+        delete_action = menu.addAction("닫기")
 
         open_action.triggered.connect(
             lambda _checked=False: self.card_open_requested.emit(card_id)

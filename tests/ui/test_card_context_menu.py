@@ -90,7 +90,7 @@ def test_card_context_menu_has_required_actions_and_selection_conditions(
         "편집기에서 열기",
         "본문 복사",
         "파일로 내보내기",
-        "삭제",
+        "닫기",
     ]
 
     selection_model = view.selectionModel()
@@ -120,7 +120,7 @@ def test_card_context_menu_has_required_actions_and_selection_conditions(
         "편집기에서 열기",
         "본문 복사",
         "파일로 내보내기",
-        "삭제",
+        "닫기",
     ]
     assert view._build_context_menu(QModelIndex()) is None
 
@@ -143,7 +143,7 @@ def test_card_context_menu_reexposes_open_copy_and_delete(
     single_actions = _menu_actions(view, 0)
     single_actions["편집기에서 열기"].trigger()
     single_actions["본문 복사"].trigger()
-    single_actions["삭제"].trigger()
+    single_actions["닫기"].trigger()
 
     assert opened == [first.id]
     assert QApplication.clipboard().text() == first.body
@@ -198,7 +198,7 @@ def test_right_click_opens_menu_only_over_a_card(
         "편집기에서 열기",
         "본문 복사",
         "파일로 내보내기",
-        "삭제",
+        "닫기",
     ]
 
     empty_position = QPoint(
@@ -235,7 +235,7 @@ def test_context_delete_soft_deletes_without_confirmation_and_can_restore(
     )
 
     actions = _menu_actions(page.stream, 0)
-    actions["삭제"].trigger()
+    actions["닫기"].trigger()
 
     deleted = repositories.get_card(second.id)
     assert deleted is not None
@@ -278,7 +278,7 @@ def test_context_delete_applies_to_entire_multiple_selection(
     )
 
     actions = _menu_actions(page.stream, 0)
-    actions["삭제"].trigger()
+    actions["닫기"].trigger()
 
     assert page.stream.card_model.rowCount() == 0
     for card_id in (first.id, second.id):
