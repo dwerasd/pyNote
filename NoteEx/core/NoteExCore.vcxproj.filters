@@ -40,6 +40,9 @@
     <ClInclude Include="include\pynote\core\domain\card_drag_session_registry.h">
       <Filter>도메인</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\card_wheel_browse.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
     <ClInclude Include="include\pynote\core\application\card_service.h">
       <Filter>응용</Filter>
     </ClInclude>
@@ -118,6 +121,9 @@
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\domain\card_drag_session_registry.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\card_wheel_browse.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\application\card_service.cpp">
