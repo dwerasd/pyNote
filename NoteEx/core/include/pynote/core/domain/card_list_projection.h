@@ -16,6 +16,8 @@ namespace pynote::core::domain
 	enum class E_CARD_LIST_SORT_MODE { Recency, Position, Capture };
 	enum class E_CARD_LIST_DELTA_KIND { Reset, Insert, Move, Update };
 	enum class E_CARD_LIST_DELTA_FIELD { Card, Preview, PreviewTruncated, DirtyDraft };
+	enum class E_CARD_SELECTION_MODE { Single, Extended };
+	enum class E_CARD_SELECTION_INTENT { Replace, Additive, RangeLike };
 
 	struct S_CARD_LIST_DELTA
 	{
@@ -33,6 +35,14 @@ namespace pynote::core::domain
 		std::size_t nCodepointsExamined{ 0 };
 		std::size_t nBytesConsumed{ 0 };
 		bool operator==(const S_CARD_PREVIEW&) const = default;
+	};
+
+	struct S_CARD_SELECTION_DELTA
+	{
+		E_CARD_SELECTION_MODE eMode{ E_CARD_SELECTION_MODE::Single };
+		std::optional<std::string> sCurrentCardId{};
+		std::vector<std::string> SelectedCardIds;
+		bool operator==(const S_CARD_SELECTION_DELTA&) const = default;
 	};
 
 	std::string_view TraceName(E_CARD_LIST_DELTA_FIELD _eField) noexcept;
@@ -65,6 +75,14 @@ namespace pynote::core::domain
 		const std::optional<std::string>& CurrentCardId() const noexcept { return m_sCurrentCardId; }
 		void SetSelectedCardIds(std::vector<std::string> _CardIds);
 		const std::vector<std::string>& SelectedCardIds() const noexcept { return m_SelectedCardIds; }
+		void SetMultiSelectionEnabled(bool _bEnabled);
+		bool MultiSelectionEnabled() const noexcept { return m_eSelectionMode == E_CARD_SELECTION_MODE::Extended; }
+		E_CARD_SELECTION_MODE SelectionMode() const noexcept { return m_eSelectionMode; }
+		bool SelectVisibleCard(std::string_view _sCardId, E_CARD_SELECTION_INTENT _eIntent);
+		bool MoveCurrentBy(std::ptrdiff_t _nRowDelta);
+		std::vector<std::string> CopySelectionForCommand() const { return m_SelectedCardIds; }
+		const std::vector<S_CARD_SELECTION_DELTA>& SelectionDeltas() const noexcept { return m_SelectionDeltas; }
+		std::vector<S_CARD_SELECTION_DELTA> TakeSelectionDeltas();
 
 		void SetCardDirty(std::string_view _sCardId, bool _bDirty);
 		bool IsCardDirty(std::string_view _sCardId) const;
@@ -77,6 +95,10 @@ namespace pynote::core::domain
 
 	private:
 		void rebuild_visible_();
+		void normalize_selection_();
+		void record_selection_change_(E_CARD_SELECTION_MODE _eBeforeMode,
+			const std::optional<std::string>& _sBeforeCurrent,
+			const std::vector<std::string>& _BeforeSelected);
 		const S_CARD* find_card_(std::string_view _sCardId) const noexcept;
 		std::vector<S_CARD> m_Cards;
 		std::vector<const S_CARD*> m_Visible;
@@ -85,6 +107,8 @@ namespace pynote::core::domain
 		std::size_t m_nPreviewLineCount{ 3 };
 		std::optional<std::string> m_sCurrentCardId{};
 		std::vector<std::string> m_SelectedCardIds;
+		E_CARD_SELECTION_MODE m_eSelectionMode{ E_CARD_SELECTION_MODE::Single };
+		std::vector<S_CARD_SELECTION_DELTA> m_SelectionDeltas;
 		std::set<std::string> m_DirtyCardIds;
 		std::vector<S_CARD_LIST_DELTA> m_Deltas;
 	};
