@@ -24,6 +24,9 @@
     <ClInclude Include="include\pynote\core\domain\models.h">
       <Filter>도메인</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\paragraph_parser.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
       <Filter>도메인</Filter>
     </ClInclude>
@@ -81,6 +84,9 @@
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\domain\models.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\paragraph_parser.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
