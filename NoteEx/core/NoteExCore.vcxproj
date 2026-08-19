@@ -60,6 +60,7 @@
     <ClInclude Include="include\pynote\core\domain\models.h" />
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h" />
     <ClInclude Include="include\pynote\core\domain\diffing.h" />
+    <ClInclude Include="include\pynote\core\domain\card_list_projection.h" />
     <ClInclude Include="include\pynote\core\application\card_service.h" />
     <ClInclude Include="include\pynote\core\application\import_pipeline.h" />
     <ClInclude Include="include\pynote\core\application\export.h" />
@@ -86,6 +87,7 @@
     <ClCompile Include="src\domain\models.cpp" />
     <ClCompile Include="src\domain\paragraph_parser.cpp" />
     <ClCompile Include="src\domain\diffing.cpp" />
+    <ClCompile Include="src\domain\card_list_projection.cpp" />
     <ClCompile Include="src\application\card_service.cpp" />
     <ClCompile Include="src\application\import_pipeline.cpp" />
     <ClCompile Include="src\application\export.cpp" />
