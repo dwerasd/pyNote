@@ -7,6 +7,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace pynote::core::application
 {
@@ -14,6 +15,24 @@ namespace pynote::core::application
 	enum class E_FIRST_INPUT_EFFECT { CreationFailed, ConnectCreatedCard, AlreadyConnected };
 	enum class E_FIRST_INPUT_ATTEMPT_OUTCOME { NotAttempted, Succeeded, Rejected, Exception };
 	enum class E_FIRST_INPUT_RECOVERY_EFFECT { SnapshotUpdated, CreateFailed, LinkPending, Connected, AlreadyConnected };
+	enum class E_FIRST_INPUT_DELIVERY_EFFECT
+	{
+		CardCreated,
+		HistoryRefresh,
+		ContentChanged,
+		DocumentChanged,
+		CardConnected,
+		HistoryCard,
+		CardOpened
+	};
+
+	struct S_FIRST_INPUT_DELIVERY_EFFECT
+	{
+		E_FIRST_INPUT_DELIVERY_EFFECT eEffect{ E_FIRST_INPUT_DELIVERY_EFFECT::CardCreated };
+		std::string sCardId;
+		std::string sDocumentId;
+		bool operator==(const S_FIRST_INPUT_DELIVERY_EFFECT&) const = default;
+	};
 
 	struct S_NEW_BACKING_SNAPSHOT
 	{
@@ -48,6 +67,7 @@ namespace pynote::core::application
 		std::optional<std::string> sCreatedCardId{};
 		std::optional<std::string> sPendingCardId{};
 		std::optional<std::string> sConnectedCardId{};
+		std::vector<S_FIRST_INPUT_DELIVERY_EFFECT> DeliveryEffects;
 	};
 
 	struct S_FIRST_INPUT_RESULT

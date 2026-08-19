@@ -77,6 +77,10 @@ namespace pynote::core::application
 		_Result.eEffect = E_FIRST_INPUT_RECOVERY_EFFECT::Connected;
 		_Result.sPendingCardId.reset();
 		_Result.sConnectedCardId = m_sConnectedCardId;
+		for (const auto effect : { E_FIRST_INPUT_DELIVERY_EFFECT::CardConnected,
+			E_FIRST_INPUT_DELIVERY_EFFECT::HistoryCard, E_FIRST_INPUT_DELIVERY_EFFECT::CardOpened }) {
+			_Result.DeliveryEffects.push_back({ effect, _Card.sId, _Card.sDocumentId });
+		}
 		return _Result;
 	}
 
@@ -100,6 +104,11 @@ namespace pynote::core::application
 		result.eCreateOutcome = E_FIRST_INPUT_ATTEMPT_OUTCOME::Succeeded;
 		result.sCreatedCardId = card->sId;
 		m_pProjection->AddCard(*card);
+		for (const auto effect : { E_FIRST_INPUT_DELIVERY_EFFECT::CardCreated,
+			E_FIRST_INPUT_DELIVERY_EFFECT::HistoryRefresh, E_FIRST_INPUT_DELIVERY_EFFECT::ContentChanged,
+			E_FIRST_INPUT_DELIVERY_EFFECT::DocumentChanged }) {
+			result.DeliveryEffects.push_back({ effect, card->sId, card->sDocumentId });
+		}
 		m_sPendingCardId = card->sId;
 		m_ePhase = E_FIRST_INPUT_PHASE::PendingLink;
 		result.ePhase = m_ePhase;

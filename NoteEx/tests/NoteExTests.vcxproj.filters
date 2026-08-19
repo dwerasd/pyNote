@@ -102,6 +102,9 @@
     <ClCompile Include="unit\first_input_recovery_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\first_input_delivery_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\workspace_state_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
