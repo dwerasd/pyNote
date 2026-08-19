@@ -13,10 +13,9 @@ import html
 import platform
 import re
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Iterable
-
 
 SOURCE_SHA256 = "78ba556a0b878da06052084466bcdb8b6d7ccc77ddd8fa087ded65056352a3bd"
 SECTION_SPECS = (
@@ -66,18 +65,114 @@ class UncertainLink:
 
 
 UNCERTAIN_LINKS = (
-    UncertainLink("UNC-001", "QDateTime", "W0", "T1 / D6", "T4A-UNC-001", "기존 Qt 날짜 형식 저장값 전건을 해석하고 동일 표시 fixture를 재현한다.", "W7에 Qt-token 호환 formatter를 두고 미지원 token은 명시적 이관 판정으로 보낸다."),
-    UncertainLink("UNC-002", "QSettings", "W0", "T1 / D8", "T4A-UNC-002", "HKCU 기존 경로·값 형식·geometry blob 전수와 typed device-key schema가 일대일 대응한다.", "일회성 registry 이관 어댑터 범위를 확대하고 해석 불가 원시값을 보존한다."),
-    UncertainLink("UNC-003", "QStandardPaths", "W0", "T1 / D8", "T4A-UNC-003", "실측한 기존 DB 절대 경로와 LocalAppData 기반 새 경로가 동일 데이터 위치를 가리킨다.", "기존 경로 탐색·명시 이관 gate를 W3 시작 차단 조건으로 둔다."),
-    UncertainLink("UNC-004", "QTimeZone", "W0", "T1 / D6", "T4A-UNC-004", "기존 저장 timezone ID 전건이 Windows zone으로 무손실 대응되고 대표 시각 fixture가 일치한다.", "IANA-Windows 명시 매핑 테이블과 미지원 값의 local fallback 이관을 둔다."),
-    UncertainLink("UNC-005", "QInputMethodEvent", "W0", "T2 / P1", "T4A-UNC-005", "한국어·일본어 IME의 preedit/commit/cancel 순서와 조합 중 이탈 거부가 P1 trace와 일치한다.", "Rich Edit를 기각하고 DirectWrite+IMM32, 이어 TSF 후보 순으로 승급한다."),
-    UncertainLink("UNC-006", "QPalette", "W4", "W0 D9 및 T3 / P2", "T4A-UNC-006", "light/dark/high-contrast fixture에서 선택·hover·본문·placeholder 대비와 의미가 보존된다.", "system color 역할 매핑을 보정하고 owner-draw 색 정책을 W4에서 재동결한다."),
-    UncertainLink("UNC-007", "QTextDocument", "W0", "T2 / P1", "T4A-UNC-007", "LF·CRLF·non-BMP·삭제·formatting 알림의 position/removed/added trace가 UTF-16 계약과 일치한다.", "Rich Edit를 기각하고 다음 P1 후보로 승급한다."),
-    UncertainLink("UNC-008", "QApplication", "W0", "T1 / D9", "T4A-UNC-008", "PerMonitorV2 요구 API 전건과 P1·P2·smoke가 선택한 Windows 하한에서 실행된다.", "지원 하한을 재판정하며 더 낮은 하한이 필요하면 DPI 전략 변경을 사용자 결정으로 올린다."),
-    UncertainLink("UNC-009", "QPlainTextEdit", "W0", "T2 / P1", "T4A-UNC-009", "exact LF·UTF-16 cursor·IME·첫 입력 undo의 P1 7기준 전건이 같은 HWND에서 통과한다.", "DirectWrite+IMM32, 이어 TSF 후보 순으로 승급한다."),
-    UncertainLink("UNC-010", "QPlainTextEdit 내부 undo stack", "W0", "T2 / P1", "T4A-UNC-010", "첫 의미 입력이 정확히 한 undo 단위이며 load 시 clear와 replace-all 단일 undo가 재현된다.", "현재 P1 후보를 기각하고 다음 후보의 undo 모델을 시험한다."),
-    UncertainLink("UNC-011", "QFontMetrics", "W0", "T3 / P2", "T4A-UNC-011", "한국어·non-BMP advance와 line metric fixture가 허용 오차와 줄 수 계약 안에서 일치한다.", "D2DWrapp text-layout 보정층을 추가하고 보정 불가 시 렌더 후보를 재판정한다."),
-    UncertainLink("UNC-012", "QTextLayout", "W0", "T3 / P2", "T4A-UNC-012", "CR/LF·긴 무공백·surrogate pair wrap과 final-line ellipsis fixture가 전건 일치한다.", "D2DWrapp line-break 보정 후 재시험하고 실패하면 P2 렌더 후보를 재판정한다."),
+    UncertainLink(
+        "UNC-001",
+        "QDateTime",
+        "W0",
+        "T1 / D6",
+        "T4A-UNC-001",
+        "기존 Qt 날짜 형식 저장값 전건을 해석하고 동일 표시 fixture를 재현한다.",
+        "W7에 Qt-token 호환 formatter를 두고 미지원 token은 명시적 이관 판정으로 보낸다.",
+    ),
+    UncertainLink(
+        "UNC-002",
+        "QSettings",
+        "W0",
+        "T1 / D8",
+        "T4A-UNC-002",
+        "HKCU 기존 경로·값 형식·geometry blob 전수와 typed device-key schema가 일대일 대응한다.",
+        "일회성 registry 이관 어댑터 범위를 확대하고 해석 불가 원시값을 보존한다.",
+    ),
+    UncertainLink(
+        "UNC-003",
+        "QStandardPaths",
+        "W0",
+        "T1 / D8",
+        "T4A-UNC-003",
+        "실측한 기존 DB 절대 경로와 LocalAppData 기반 새 경로가 동일 데이터 위치를 가리킨다.",
+        "기존 경로 탐색·명시 이관 gate를 W3 시작 차단 조건으로 둔다.",
+    ),
+    UncertainLink(
+        "UNC-004",
+        "QTimeZone",
+        "W0",
+        "T1 / D6",
+        "T4A-UNC-004",
+        "기존 저장 timezone ID 전건이 Windows zone으로 무손실 대응되고 대표 시각 fixture가 일치한다.",
+        "IANA-Windows 명시 매핑 테이블과 미지원 값의 local fallback 이관을 둔다.",
+    ),
+    UncertainLink(
+        "UNC-005",
+        "QInputMethodEvent",
+        "W0",
+        "T2 / P1",
+        "T4A-UNC-005",
+        "한국어·일본어 IME의 preedit/commit/cancel 순서와 조합 중 이탈 거부가 P1 trace와 일치한다.",
+        "Rich Edit를 기각하고 DirectWrite+IMM32, 이어 TSF 후보 순으로 승급한다.",
+    ),
+    UncertainLink(
+        "UNC-006",
+        "QPalette",
+        "W4",
+        "W0 D9 및 T3 / P2",
+        "T4A-UNC-006",
+        "light/dark/high-contrast fixture에서 선택·hover·본문·placeholder 대비와 의미가 보존된다.",
+        "system color 역할 매핑을 보정하고 owner-draw 색 정책을 W4에서 재동결한다.",
+    ),
+    UncertainLink(
+        "UNC-007",
+        "QTextDocument",
+        "W0",
+        "T2 / P1",
+        "T4A-UNC-007",
+        "LF·CRLF·non-BMP·삭제·formatting 알림의 position/removed/added trace가 UTF-16 계약과 일치한다.",
+        "Rich Edit를 기각하고 다음 P1 후보로 승급한다.",
+    ),
+    UncertainLink(
+        "UNC-008",
+        "QApplication",
+        "W0",
+        "T1 / D9",
+        "T4A-UNC-008",
+        "PerMonitorV2 요구 API 전건과 P1·P2·smoke가 선택한 Windows 하한에서 실행된다.",
+        "지원 하한을 재판정하며 더 낮은 하한이 필요하면 DPI 전략 변경을 사용자 결정으로 올린다.",
+    ),
+    UncertainLink(
+        "UNC-009",
+        "QPlainTextEdit",
+        "W0",
+        "T2 / P1",
+        "T4A-UNC-009",
+        "exact LF·UTF-16 cursor·IME·첫 입력 undo의 P1 7기준 전건이 같은 HWND에서 통과한다.",
+        "DirectWrite+IMM32, 이어 TSF 후보 순으로 승급한다.",
+    ),
+    UncertainLink(
+        "UNC-010",
+        "QPlainTextEdit 내부 undo stack",
+        "W0",
+        "T2 / P1",
+        "T4A-UNC-010",
+        "첫 의미 입력이 정확히 한 undo 단위이며 load 시 clear와 replace-all 단일 undo가 재현된다.",
+        "현재 P1 후보를 기각하고 다음 후보의 undo 모델을 시험한다.",
+    ),
+    UncertainLink(
+        "UNC-011",
+        "QFontMetrics",
+        "W0",
+        "T3 / P2",
+        "T4A-UNC-011",
+        "한국어·non-BMP advance와 line metric fixture가 허용 오차와 줄 수 계약 안에서 일치한다.",
+        "D2DWrapp text-layout 보정층을 추가하고 보정 불가 시 렌더 후보를 재판정한다.",
+    ),
+    UncertainLink(
+        "UNC-012",
+        "QTextLayout",
+        "W0",
+        "T3 / P2",
+        "T4A-UNC-012",
+        "CR/LF·긴 무공백·surrogate pair wrap과 final-line ellipsis fixture가 전건 일치한다.",
+        "D2DWrapp line-break 보정 후 재시험하고 실패하면 P2 렌더 후보를 재판정한다.",
+    ),
 )
 
 
@@ -100,13 +195,24 @@ def read_exact_text(path: Path) -> tuple[str, str]:
 
 def source_rows(source_text: str) -> list[SourceRow]:
     lines = source_text.splitlines()
-    heading_positions = {line: index for index, line in enumerate(lines) if line.startswith("[") and line.endswith("]")}
+    heading_positions = {
+        line: index
+        for index, line in enumerate(lines)
+        if line.startswith("[") and line.endswith("]")
+    }
     rows: list[SourceRow] = []
     for heading, prefix, expected_count in SECTION_SPECS:
         if heading not in heading_positions:
             raise MatrixError(f"SOURCE_SECTION: 정본 절이 없다: {heading}")
         start = heading_positions[heading] + 1
-        end = next((i for i in range(start, len(lines)) if lines[i].startswith("[") and lines[i].endswith("]")), len(lines))
+        end = next(
+            (
+                i
+                for i in range(start, len(lines))
+                if lines[i].startswith("[") and lines[i].endswith("]")
+            ),
+            len(lines),
+        )
         section_rows: list[str] = []
         for line in lines[start:end]:
             if line.startswith("- "):
@@ -118,7 +224,9 @@ def source_rows(source_text: str) -> list[SourceRow]:
                     continue
                 section_rows.append(line)
         if len(section_rows) != expected_count:
-            raise MatrixError(f"SOURCE_COUNT: {heading} {len(section_rows)}행, 기대 {expected_count}행")
+            raise MatrixError(
+                f"SOURCE_COUNT: {heading} {len(section_rows)}행, 기대 {expected_count}행"
+            )
         for number, text in enumerate(section_rows, 1):
             rows.append(SourceRow(f"CAP-{prefix}-{number:03d}", heading[1:-1], text))
     if len(rows) != EXPECTED_TOTAL:
@@ -151,7 +259,22 @@ def _build_owner_map() -> dict[str, str]:
     add("FI", "W4", (24, 29, *range(56, 67), 69, 70, 71))
     add("FI", "W5", (28, 80, 82, *range(90, 99)))
     add("FI", "W6", (13, 37, 72, 81, *range(83, 90), 100))
-    add("FI", "W7", (14, *range(17, 24), 25, *range(31, 34), *range(39, 56), 67, 68, *range(73, 80), *range(101, 118), 122))
+    add(
+        "FI",
+        "W7",
+        (
+            14,
+            *range(17, 24),
+            25,
+            *range(31, 34),
+            *range(39, 56),
+            67,
+            68,
+            *range(73, 80),
+            *range(101, 118),
+            122,
+        ),
+    )
 
     # TEXT AND INPUT: core text coordinates/provenance, editor input, card-list
     # gestures, save integration, and peripheral file import remain distinct.
@@ -308,6 +431,10 @@ def validate_rows(expected: list[SourceRow], actual: list[MatrixRow]) -> list[st
     if not duplicates and actual_ids == set(expected_by_id):
         if ids != [row.row_id for row in expected]:
             problems.append("ORDER: 정본 행 원순서가 바뀌었다")
+    probe_ids = [row.probe_id for row in actual if row.probe_id]
+    duplicate_probes = sorted({probe_id for probe_id in probe_ids if probe_ids.count(probe_id) > 1})
+    for probe_id in duplicate_probes:
+        problems.append(f"PROBE_DUPLICATE: probe/시험 ID가 중복이다: {probe_id}")
     seen: set[str] = set()
     for row in actual:
         if row.row_id in seen or row.row_id not in expected_by_id:
@@ -321,10 +448,31 @@ def validate_rows(expected: list[SourceRow], actual: list[MatrixRow]) -> list[st
         elif row.owner == "W8":
             problems.append(f"OWNER_W8: W8은 구현 owner가 아니다: {row.row_id}")
         elif not VALID_OWNER.fullmatch(row.owner):
-            problems.append(f"OWNER_MULTIPLE: owner는 W0~W7 하나여야 한다: {row.row_id}={row.owner}")
-        for field_name, value in (("artifact", row.artifact), ("probe_id", row.probe_id), ("gate", row.gate), ("evidence", row.evidence)):
+            problems.append(
+                f"OWNER_MULTIPLE: owner는 W0~W7 하나여야 한다: {row.row_id}={row.owner}"
+            )
+        elif row.owner != OWNER_BY_ID[row.row_id]:
+            problems.append(
+                f"OWNER_MISMATCH: semantic owner가 다르다: {row.row_id}="
+                f"{row.owner}, 기대 {OWNER_BY_ID[row.row_id]}"
+            )
+        for field_name, value in (
+            ("artifact", row.artifact),
+            ("probe_id", row.probe_id),
+            ("gate", row.gate),
+            ("evidence", row.evidence),
+        ):
             if not value:
                 problems.append(f"REQUIRED_BLANK: 필수 열이 비었다: {row.row_id}.{field_name}")
+        expected_artifact = ARTIFACTS[OWNER_BY_ID[row.row_id]]
+        if row.artifact and row.artifact != expected_artifact:
+            problems.append(f"ARTIFACT_MISMATCH: owner 산출물이 다르다: {row.row_id}")
+        expected_probe = row.row_id.replace("CAP-", "WTL-CAP-")
+        if row.probe_id and row.probe_id != expected_probe:
+            problems.append(f"PROBE_MISMATCH: 안정 probe/시험 ID가 다르다: {row.row_id}")
+        expected_gate = f'x64\\ReleaseMD\\NoteExTests.exe "{expected_probe}"'
+        if row.gate and row.gate != expected_gate:
+            problems.append(f"GATE_MISMATCH: gate 명령이 다르다: {row.row_id}")
     return problems
 
 
@@ -339,8 +487,6 @@ def validate_uncertain(actual: list[UncertainLink]) -> list[str]:
         expected = expected_by_id.get(row.link_id)
         if expected is None:
             continue
-        if row.qt_row != expected.qt_row:
-            problems.append(f"UNCERTAIN_SET: Qt 행 연결이 다르다: {row.link_id}")
         if row.owner == "W8" or (row.owner and not VALID_OWNER.fullmatch(row.owner)):
             problems.append(f"UNCERTAIN_OWNER: owner는 W0~W7 하나여야 한다: {row.link_id}")
         required = (row.owner, row.prerequisite, row.probe_id, row.predicate, row.fallback)
@@ -348,22 +494,28 @@ def validate_uncertain(actual: list[UncertainLink]) -> list[str]:
             problems.append(f"UNCERTAIN_W0_INCOMPLETE: W0 연결이 불완전하다: {row.link_id}")
         elif any(not value for value in required):
             problems.append(f"UNCERTAIN_INCOMPLETE: 연결이 불완전하다: {row.link_id}")
+        elif row != expected:
+            problems.append(f"UNCERTAIN_CHANGED: 동결 연결 의미가 바뀌었다: {row.link_id}")
     return problems
 
 
-def validate(expected: list[SourceRow], matrix: list[MatrixRow], uncertain: list[UncertainLink]) -> list[str]:
+def validate(
+    expected: list[SourceRow], matrix: list[MatrixRow], uncertain: list[UncertainLink]
+) -> list[str]:
     return validate_rows(expected, matrix) + validate_uncertain(uncertain)
 
 
 def render_document(source_path: str, rows: list[SourceRow]) -> str:
     matrix = default_matrix(rows)
     lines = [
-        "# pyNote WTL 포팅 capability 추적표 — T4a 01",
+        "# pyNote WTL 포팅 capability 추적표 — T4a 재발행 01",
         "",
-        "- MODE A / T4a 동결본. T4b errata 발행 전 known-good은 아래 F_a01 자체다.",
+        "- MODE A / T4a max 재판정 동결본. 기존 Sol high 판본은 이 문서로 대체한다.",
+        "- T4b errata 발행 전 known-good은 아래 F_a01 자체다.",
         f"- source: `{source_path}`",
         f"- source SHA-256: `{SOURCE_SHA256}`",
         f"- 행 수: `{len(rows)}` (기능 122 + TEXT 27 + RENDERING 19 + PERSISTENCE 40 + PROCESS 26 + NON-FEATURE 40)",
+        "- checker는 정본 원순서·내용뿐 아니라 exact semantic owner·owner 산출물·유일 probe ID·exact gate와 `[UNCERTAIN]` 12건의 전체 연결 의미를 검사한다.",
         "- 시험 명령 작업 디렉터리: `D:\\Sources\\python\\pyNote\\NoteEx`",
         "- 완료 증거는 T4c가 실측 결과를 backfill하기 전까지 전건 `미실시`다. 예정 산출물·시험 ID·gate는 완료 증거가 아니다.",
         "",
@@ -373,19 +525,48 @@ def render_document(source_path: str, rows: list[SourceRow]) -> str:
         "| 행 ID | 정본 절 | 원문 행 내용 | 구현 owner wave | 구현 산출물 | 안정 probe/시험 ID | gate 명령 | 완료 증거 |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    lines.extend(render_table_row((row.row_id, row.section, row.text, row.owner, row.artifact, row.probe_id, row.gate, row.evidence)) for row in matrix)
-    lines.extend([
-        MATRIX_END,
-        "",
-        "## Appendix A `[UNCERTAIN]` linkage",
-        "",
-        "설계서 §14의 `[UNCERTAIN]` 행 12건을 연결한다. W0 owner는 T1·T2·T3에서 닫고, 후속 wave owner는 해당 wave의 착수 차단 조건으로 유지한다.",
-        "",
-        UNCERTAIN_BEGIN,
-        "| 연결 ID | §14 Qt 행 | owner | 선행 wave/태스크 | probe/시험 ID | PASS 술어 | 실패 시 대안 |",
-        "|---|---|---|---|---|---|---|",
-    ])
-    lines.extend(render_table_row((row.link_id, row.qt_row, row.owner, row.prerequisite, row.probe_id, row.predicate, row.fallback)) for row in UNCERTAIN_LINKS)
+    lines.extend(
+        render_table_row(
+            (
+                row.row_id,
+                row.section,
+                row.text,
+                row.owner,
+                row.artifact,
+                row.probe_id,
+                row.gate,
+                row.evidence,
+            )
+        )
+        for row in matrix
+    )
+    lines.extend(
+        [
+            MATRIX_END,
+            "",
+            "## Appendix A `[UNCERTAIN]` linkage",
+            "",
+            "설계서 §14의 `[UNCERTAIN]` 행 12건을 연결한다. W0 owner는 T1·T2·T3에서 닫고, 후속 wave owner는 해당 wave의 착수 차단 조건으로 유지한다.",
+            "",
+            UNCERTAIN_BEGIN,
+            "| 연결 ID | §14 Qt 행 | owner | 선행 wave/태스크 | probe/시험 ID | PASS 술어 | 실패 시 대안 |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
+    lines.extend(
+        render_table_row(
+            (
+                row.link_id,
+                row.qt_row,
+                row.owner,
+                row.prerequisite,
+                row.probe_id,
+                row.predicate,
+                row.fallback,
+            )
+        )
+        for row in UNCERTAIN_LINKS
+    )
     lines.extend([UNCERTAIN_END, ""])
     return "\n".join(lines)
 
@@ -416,19 +597,83 @@ def run_self_test(source: Path) -> int:
         ("누락", "MISSING:", lambda: (good[1:], links)),
         ("중복", "DUPLICATE:", lambda: ([good[0], *good], links)),
         ("무단 추가", "EXTRA:", lambda: ([*good, replace(good[-1], row_id="CAP-XX-999")], links)),
-        ("승인되지 않은 의미 변경", "CHANGED:", lambda: (_replace_matrix_row(good, 0, text=good[0].text + " altered"), links)),
-        ("owner 미배정", "OWNER_UNASSIGNED:", lambda: (_replace_matrix_row(good, 0, owner=""), links)),
-        ("owner 중복", "OWNER_MULTIPLE:", lambda: (_replace_matrix_row(good, 0, owner="W3,W4"), links)),
-        ("필수 열 공란", "REQUIRED_BLANK:", lambda: (_replace_matrix_row(good, 0, artifact=""), links)),
+        ("원순서 변경", "ORDER:", lambda: ([good[1], good[0], *good[2:]], links)),
+        (
+            "승인되지 않은 의미 변경",
+            "CHANGED:",
+            lambda: (_replace_matrix_row(good, 0, text=good[0].text + " altered"), links),
+        ),
+        (
+            "owner 미배정",
+            "OWNER_UNASSIGNED:",
+            lambda: (_replace_matrix_row(good, 0, owner=""), links),
+        ),
+        (
+            "owner 중복",
+            "OWNER_MULTIPLE:",
+            lambda: (_replace_matrix_row(good, 0, owner="W3,W4"), links),
+        ),
+        (
+            "semantic owner 변경",
+            "OWNER_MISMATCH:",
+            lambda: (_replace_matrix_row(good, 0, owner="W1"), links),
+        ),
+        (
+            "필수 열 공란",
+            "REQUIRED_BLANK:",
+            lambda: (_replace_matrix_row(good, 0, artifact=""), links),
+        ),
+        (
+            "owner 산출물 변경",
+            "ARTIFACT_MISMATCH:",
+            lambda: (_replace_matrix_row(good, 0, artifact="altered artifact"), links),
+        ),
+        (
+            "probe ID 변경",
+            "PROBE_MISMATCH:",
+            lambda: (_replace_matrix_row(good, 0, probe_id="WTL-CAP-WRONG-001"), links),
+        ),
+        (
+            "probe ID 중복",
+            "PROBE_DUPLICATE:",
+            lambda: (_replace_matrix_row(good, 1, probe_id=good[0].probe_id), links),
+        ),
+        (
+            "gate 명령 변경",
+            "GATE_MISMATCH:",
+            lambda: (_replace_matrix_row(good, 0, gate="wrong gate"), links),
+        ),
         ("W8 owner", "OWNER_W8:", lambda: (_replace_matrix_row(good, 0, owner="W8"), links)),
-        ("W0 UNCERTAIN 연결 불완전", "UNCERTAIN_W0_INCOMPLETE:", lambda: (good, [replace(links[0], predicate=""), *links[1:]])),
+        (
+            "W0 UNCERTAIN 연결 불완전",
+            "UNCERTAIN_W0_INCOMPLETE:",
+            lambda: (good, [replace(links[0], predicate=""), *links[1:]]),
+        ),
+        (
+            "UNCERTAIN 의미 변경",
+            "UNCERTAIN_CHANGED:",
+            lambda: (
+                good,
+                [replace(links[0], predicate=links[0].predicate + " altered"), *links[1:]],
+            ),
+        ),
     ]
     failed = False
     for name, expected_reason, make_bad in mutations:
         bad_rows, bad_links = make_bad()
         problems = validate(expected, bad_rows, bad_links)
         matching = [problem for problem in problems if problem.startswith(expected_reason)]
-        unrelated = [problem for problem in problems if not problem.startswith(expected_reason) and not (name in {"누락", "중복", "무단 추가"} and problem.startswith("ORDER:"))]
+        allowed_related = {
+            "중복": ("ORDER:", "PROBE_DUPLICATE:"),
+            "무단 추가": ("PROBE_DUPLICATE:",),
+            "probe ID 중복": ("PROBE_MISMATCH:",),
+        }.get(name, ())
+        unrelated = [
+            problem
+            for problem in problems
+            if not problem.startswith(expected_reason)
+            and not any(problem.startswith(prefix) for prefix in allowed_related)
+        ]
         if len(matching) == 1 and not unrelated:
             print(f"PASS  seeded known-bad 거부: {name} -> {matching[0]}")
         else:
