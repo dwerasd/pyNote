@@ -58,6 +58,9 @@
     <ClInclude Include="include\pynote\core\application\drop_import_completion.h">
       <Filter>응용</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\application\first_input_capture.h">
+      <Filter>응용</Filter>
+    </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
       <Filter>도메인</Filter>
     </ClInclude>
@@ -145,6 +148,9 @@
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\drop_import_completion.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\first_input_capture.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
