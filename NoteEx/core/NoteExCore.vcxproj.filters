@@ -17,6 +17,10 @@
       <UniqueIdentifier>{f6fd262c-1709-47fc-8cb0-d721531b39e0}</UniqueIdentifier>
       <Extensions>h;hpp;cpp</Extensions>
     </Filter>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{cb8918b2-627f-4af9-9fef-19f108531c67}</UniqueIdentifier>
+      <Extensions>h;cc;inc</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\pynote\core\text\utf16_offset.h">
@@ -29,6 +33,9 @@
       <Filter>도메인</Filter>
     </ClInclude>
     <ClInclude Include="include\pynote\core\domain\date_time_formatter.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\time_zone_resolver.h">
       <Filter>도메인</Filter>
     </ClInclude>
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h">
@@ -70,6 +77,19 @@
     <ClInclude Include="src\domain\enum_spelling.h">
       <Filter>도메인</Filter>
     </ClInclude>
+    <ClInclude Include="src\domain\bundled_tzdata_2026c.h"><Filter>도메인</Filter></ClInclude>
+    <ClInclude Include="src\domain\bundled_tzdata_2026c.inc"><Filter>도메인</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\include\cctz\civil_time.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\include\cctz\civil_time_detail.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\include\cctz\time_zone.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\include\cctz\zone_info_source.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_fixed.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_if.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_impl.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_info.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_libc.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\time_zone_posix.h"><Filter>third_party</Filter></ClInclude>
+    <ClInclude Include="..\third_party\cctz\src\tzfile.h"><Filter>third_party</Filter></ClInclude>
     <ClInclude Include="include\pynote\core\storage\repositories.h">
       <Filter>저장</Filter>
     </ClInclude>
@@ -129,6 +149,8 @@
     <ClCompile Include="src\domain\date_time_formatter.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
+    <ClCompile Include="src\domain\time_zone_resolver.cpp"><Filter>도메인</Filter></ClCompile>
+    <ClCompile Include="src\domain\bundled_tzdata_2026c.cpp"><Filter>도메인</Filter></ClCompile>
     <ClCompile Include="src\domain\paragraph_parser.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
@@ -165,6 +187,16 @@
     <ClCompile Include="src\application\workspace_state.cpp">
       <Filter>응용</Filter>
     </ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_fixed.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_format.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_if.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_impl.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_info.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_libc.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_lookup.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_posix.cc"><Filter>third_party</Filter></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\zone_info_source.cc"><Filter>third_party</Filter></ClCompile>
     <ClCompile Include="src\storage\database.cpp">
       <Filter>저장</Filter>
     </ClCompile>

@@ -98,8 +98,8 @@ UNCERTAIN_LINKS = (
         "W0",
         "T1 / D6",
         "T4A-UNC-004",
-        "기존 저장 timezone ID 전건이 Windows zone으로 무손실 대응되고 대표 시각 fixture가 일치한다.",
-        "IANA-Windows 명시 매핑 테이블과 미지원 값의 local fallback 이관을 둔다.",
+        "기존 저장 timezone ID 전건이 원본 ID를 보존한 bundled IANA tzdata 또는 system 동적 시간대로 해석되고 대표 시각 fixture가 일치한다.",
+        "bundled IANA tzdata를 정본으로 사용하고 실패 ID는 원문을 보존해 차단하며 Windows key·local·system으로 조용히 치환하지 않는다.",
     ),
     UncertainLink(
         "UNC-005",

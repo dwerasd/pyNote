@@ -44,7 +44,7 @@
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir);D:\_Library;$(MSBuildThisFileDirectory)include;$(SolutionDir);D:\_Library;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir);D:\_Library;$(MSBuildThisFileDirectory)include;$(MSBuildThisFileDirectory)..\third_party\cctz\include;$(SolutionDir);D:\_Library;</AdditionalIncludeDirectories>
       <AdditionalOptions>/Zc:__cplusplus /Zc:threadSafeInit %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>None</DebugInformationFormat>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
@@ -59,6 +59,7 @@
     <ClInclude Include="include\pynote\core\domain\events.h" />
     <ClInclude Include="include\pynote\core\domain\models.h" />
     <ClInclude Include="include\pynote\core\domain\date_time_formatter.h" />
+    <ClInclude Include="include\pynote\core\domain\time_zone_resolver.h" />
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h" />
     <ClInclude Include="include\pynote\core\domain\diffing.h" />
     <ClInclude Include="include\pynote\core\domain\card_list_projection.h" />
@@ -72,6 +73,19 @@
     <ClInclude Include="include\pynote\core\application\first_input_capture.h" />
     <ClInclude Include="include\pynote\core\application\workspace_state.h" />
     <ClInclude Include="src\domain\enum_spelling.h" />
+    <ClInclude Include="src\domain\bundled_tzdata_2026c.h" />
+    <ClInclude Include="src\domain\bundled_tzdata_2026c.inc" />
+    <ClInclude Include="..\third_party\cctz\include\cctz\civil_time.h" />
+    <ClInclude Include="..\third_party\cctz\include\cctz\civil_time_detail.h" />
+    <ClInclude Include="..\third_party\cctz\include\cctz\time_zone.h" />
+    <ClInclude Include="..\third_party\cctz\include\cctz\zone_info_source.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_fixed.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_if.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_impl.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_info.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_libc.h" />
+    <ClInclude Include="..\third_party\cctz\src\time_zone_posix.h" />
+    <ClInclude Include="..\third_party\cctz\src\tzfile.h" />
     <ClInclude Include="include\pynote\core\storage\database.h" />
     <ClInclude Include="include\pynote\core\storage\file_system.h" />
     <ClInclude Include="include\pynote\core\storage\backup.h" />
@@ -93,6 +107,8 @@
     <ClCompile Include="src\domain\events.cpp" />
     <ClCompile Include="src\domain\models.cpp" />
     <ClCompile Include="src\domain\date_time_formatter.cpp" />
+    <ClCompile Include="src\domain\time_zone_resolver.cpp" />
+    <ClCompile Include="src\domain\bundled_tzdata_2026c.cpp" />
     <ClCompile Include="src\domain\paragraph_parser.cpp" />
     <ClCompile Include="src\domain\diffing.cpp" />
     <ClCompile Include="src\domain\card_list_projection.cpp" />
@@ -105,6 +121,16 @@
     <ClCompile Include="src\application\drop_import_completion.cpp" />
     <ClCompile Include="src\application\first_input_capture.cpp" />
     <ClCompile Include="src\application\workspace_state.cpp" />
+    <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_fixed.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_format.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_if.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_impl.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_info.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_libc.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_lookup.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\time_zone_posix.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
+    <ClCompile Include="..\third_party\cctz\src\zone_info_source.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
     <ClCompile Include="src\storage\database.cpp" />
     <ClCompile Include="src\storage\repositories.cpp" />
     <ClCompile Include="src\storage\backup.cpp" />

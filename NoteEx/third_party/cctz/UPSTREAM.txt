@@ -1,0 +1,6 @@
+Google CCTZ v2.5
+Upstream: https://github.com/google/cctz
+Commit: d2f2abda066d74c6e110b6be959d50bfb365917a
+License: Apache-2.0 (see LICENSE.txt)
+
+Only the headers and sources required by NoteExCore are imported byte-for-byte.

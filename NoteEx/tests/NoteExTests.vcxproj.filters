@@ -40,6 +40,9 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h">
+      <Filter>플랫폼</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="unit\utf16_offset_test.cpp">
@@ -67,6 +70,9 @@
       <Filter>단위 시험</Filter>
     </ClCompile>
     <ClCompile Include="unit\date_time_formatter_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\time_zone_resolver_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
     <ClCompile Include="unit\paragraph_parser_test.cpp">
@@ -133,6 +139,9 @@
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_import_support.cpp">
+      <Filter>플랫폼</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="harness\src\win32_harness.cpp">
