@@ -19,6 +19,15 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="harness\include\pynote\harness\directwrite_imm32_p1_probe.h">
+      <Filter>하네스</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\include\pynote\harness\p2_card_list_prototype.h">
+      <Filter>하네스</Filter>
+    </ClInclude>
+    <ClInclude Include="harness\include\pynote\harness\rich_edit_p1_probe.h">
+      <Filter>하네스</Filter>
+    </ClInclude>
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h">
       <Filter>하네스</Filter>
     </ClInclude>
@@ -79,6 +88,24 @@
       <Filter>하네스</Filter>
     </ClCompile>
     <ClCompile Include="harness\src\harness_smoke_test.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\directwrite_imm32_p1_probe.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\directwrite_imm32_p1_probe_test.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\p2_card_list_prototype.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\p2_card_list_test.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\rich_edit_p1_probe.cpp">
+      <Filter>하네스</Filter>
+    </ClCompile>
+    <ClCompile Include="harness\src\rich_edit_p1_probe_test.cpp">
       <Filter>하네스</Filter>
     </ClCompile>
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">

@@ -69,6 +69,9 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="harness\include\pynote\harness\directwrite_imm32_p1_probe.h" />
+    <ClInclude Include="harness\include\pynote\harness\p2_card_list_prototype.h" />
+    <ClInclude Include="harness\include\pynote\harness\rich_edit_p1_probe.h" />
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h" />
     <ClInclude Include="unit\backup_test_support.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h" />
@@ -93,6 +96,12 @@
     <ClCompile Include="..\platform\src\win32_file_system.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />
+    <ClCompile Include="harness\src\directwrite_imm32_p1_probe.cpp" />
+    <ClCompile Include="harness\src\directwrite_imm32_p1_probe_test.cpp" />
+    <ClCompile Include="harness\src\p2_card_list_prototype.cpp" />
+    <ClCompile Include="harness\src\p2_card_list_test.cpp" />
+    <ClCompile Include="harness\src\rich_edit_p1_probe.cpp" />
+    <ClCompile Include="harness\src\rich_edit_p1_probe_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
       <!-- 상류 원본이라 경고를 손대지 않는다. -->
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
