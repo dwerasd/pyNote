@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Validate the frozen WTL capability matrix against F_a01.
+"""Validate the frozen WTL capability matrix against the F_a01 errata.
 
-The matrix is deliberately project-specific.  T4a freezes the exact F_a01
-source rows and stable native test IDs; it is not a general Markdown schema.
+The matrix is deliberately project-specific. T4b rebinds the T4a rows and
+stable native test IDs to the corrected canonical source.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-SOURCE_SHA256 = "78ba556a0b878da06052084466bcdb8b6d7ccc77ddd8fa087ded65056352a3bd"
+SOURCE_SHA256 = "b9d08d92f014d77e42556156a6f5c25b4c1f331c8b15e794cb3b1425ecf98499"
 SECTION_SPECS = (
     ("[FEATURE INVENTORY]", "FI", 122),
     ("[TEXT AND INPUT]", "TI", 27),
@@ -508,10 +508,10 @@ def validate(
 def render_document(source_path: str, rows: list[SourceRow]) -> str:
     matrix = default_matrix(rows)
     lines = [
-        "# pyNote WTL 포팅 capability 추적표 — T4a 재발행 01",
+        "# pyNote WTL 포팅 capability 추적표 — T4b errata 재결속 01",
         "",
-        "- MODE A / T4a max 재판정 동결본. 기존 Sol high 판본은 이 문서로 대체한다.",
-        "- T4b errata 발행 전 known-good은 아래 F_a01 자체다.",
+        "- MODE A / T4b errata 정본 재결속본. T4a max 행 ID·owner·probe·gate 동결은 유지한다.",
+        "- known-good은 anchor checker를 통과한 아래 F_a01 errata 정본이다.",
         f"- source: `{source_path}`",
         f"- source SHA-256: `{SOURCE_SHA256}`",
         f"- 행 수: `{len(rows)}` (기능 122 + TEXT 27 + RENDERING 19 + PERSISTENCE 40 + PROCESS 26 + NON-FEATURE 40)",
@@ -693,7 +693,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.source or args.matrix:
             parser.error("--self-test는 --source/--matrix와 함께 쓰지 않는다")
         repo_root = Path(__file__).resolve().parents[3]
-        return run_self_test(repo_root / "scratchpad/orchestration/port-feasibility/out/F_a01.md")
+        return run_self_test(repo_root / "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md")
     if args.source is None or args.matrix is None:
         parser.error("검사에는 --source와 --matrix가 모두 필요하다")
 
