@@ -94,6 +94,7 @@
     <ClCompile Include="unit\card_list_projection_test.cpp" />
     <ClCompile Include="unit\card_selection_drag_test.cpp" />
     <ClCompile Include="unit\card_wheel_browse_test.cpp" />
+    <ClCompile Include="unit\drop_import_plan_test.cpp" />
     <ClCompile Include="unit\repositories_test.cpp" />
     <ClCompile Include="unit\repositories_cas_test.cpp" />
     <ClCompile Include="unit\backup_inspection_test.cpp" />

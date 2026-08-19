@@ -66,6 +66,7 @@
     <ClInclude Include="include\pynote\core\application\card_service.h" />
     <ClInclude Include="include\pynote\core\application\import_pipeline.h" />
     <ClInclude Include="include\pynote\core\application\export.h" />
+    <ClInclude Include="include\pynote\core\application\drop_import_plan.h" />
     <ClInclude Include="src\domain\enum_spelling.h" />
     <ClInclude Include="include\pynote\core\storage\database.h" />
     <ClInclude Include="include\pynote\core\storage\file_system.h" />
@@ -95,6 +96,7 @@
     <ClCompile Include="src\application\card_service.cpp" />
     <ClCompile Include="src\application\import_pipeline.cpp" />
     <ClCompile Include="src\application\export.cpp" />
+    <ClCompile Include="src\application\drop_import_plan.cpp" />
     <ClCompile Include="src\storage\database.cpp" />
     <ClCompile Include="src\storage\repositories.cpp" />
     <ClCompile Include="src\storage\backup.cpp" />
