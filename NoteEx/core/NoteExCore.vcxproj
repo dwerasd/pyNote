@@ -69,6 +69,7 @@
     <ClInclude Include="include\pynote\core\application\drop_import_plan.h" />
     <ClInclude Include="include\pynote\core\application\drop_import_completion.h" />
     <ClInclude Include="include\pynote\core\application\first_input_capture.h" />
+    <ClInclude Include="include\pynote\core\application\workspace_state.h" />
     <ClInclude Include="src\domain\enum_spelling.h" />
     <ClInclude Include="include\pynote\core\storage\database.h" />
     <ClInclude Include="include\pynote\core\storage\file_system.h" />
@@ -101,6 +102,7 @@
     <ClCompile Include="src\application\drop_import_plan.cpp" />
     <ClCompile Include="src\application\drop_import_completion.cpp" />
     <ClCompile Include="src\application\first_input_capture.cpp" />
+    <ClCompile Include="src\application\workspace_state.cpp" />
     <ClCompile Include="src\storage\database.cpp" />
     <ClCompile Include="src\storage\repositories.cpp" />
     <ClCompile Include="src\storage\backup.cpp" />
