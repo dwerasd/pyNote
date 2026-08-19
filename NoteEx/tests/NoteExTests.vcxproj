@@ -106,6 +106,7 @@
     <ClCompile Include="unit\first_input_recovery_test.cpp" />
     <ClCompile Include="unit\first_input_delivery_test.cpp" />
     <ClCompile Include="unit\workspace_state_test.cpp" />
+    <ClCompile Include="unit\w2_capability_closure_test.cpp" />
     <ClCompile Include="unit\repositories_test.cpp" />
     <ClCompile Include="unit\repositories_cas_test.cpp" />
     <ClCompile Include="unit\backup_inspection_test.cpp" />

@@ -126,6 +126,9 @@
     <ClCompile Include="unit\workspace_state_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\w2_capability_closure_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\repositories_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
