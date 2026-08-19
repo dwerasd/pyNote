@@ -13,6 +13,10 @@
       <UniqueIdentifier>{98555e6d-54d1-48b7-9f06-f0955d284c6b}</UniqueIdentifier>
       <Extensions>h;hpp;cpp</Extensions>
     </Filter>
+    <Filter Include="응용">
+      <UniqueIdentifier>{f6fd262c-1709-47fc-8cb0-d721531b39e0}</UniqueIdentifier>
+      <Extensions>h;hpp;cpp</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\pynote\core\text\utf16_offset.h">
@@ -26,6 +30,12 @@
     </ClInclude>
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h">
       <Filter>도메인</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\application\card_service.h">
+      <Filter>응용</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\application\import_pipeline.h">
+      <Filter>응용</Filter>
     </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
       <Filter>도메인</Filter>
@@ -88,6 +98,12 @@
     </ClCompile>
     <ClCompile Include="src\domain\paragraph_parser.cpp">
       <Filter>도메인</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\card_service.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\import_pipeline.cpp">
+      <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
       <Filter>저장</Filter>

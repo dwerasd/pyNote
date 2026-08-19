@@ -144,11 +144,19 @@ namespace pynote::core::storage
 			const domain::S_NEW_CAPTURE_OPERATION& _Operation,
 			const std::vector<domain::S_NEW_CARD>& _Cards,
 			std::vector<domain::S_CARD>* _pOut);
+		// 호출자가 연 활성 트랜잭션 안에서만 카드 생성 행을 쓴다. 커밋은 호출자 소유다.
+		E_REPO_RESULT CreateCardsInActiveTransaction(
+			const domain::S_NEW_CAPTURE_OPERATION& _Operation,
+			const std::vector<domain::S_NEW_CARD>& _Cards,
+			std::vector<domain::S_CARD>* _pOut);
 
 	private:
 		// 활성 카드 생성 트랜잭션 안에서 capture 순번 하나를 발급한다(:663~677).
 		// 원본과 같은 자리에서 트랜잭션 여부를 먼저 확인한다.
 		E_REPO_RESULT issue_capture_sequence_(std::int64_t* _pValue);
+		E_REPO_RESULT validate_create_cards_(
+			const domain::S_NEW_CAPTURE_OPERATION& _Operation,
+			const std::vector<domain::S_NEW_CARD>& _Cards);
 
 		// SQLite 실패를 LastError 로 옮기고 Failed 를 돌려준다.
 		E_REPO_RESULT fail_();

@@ -75,6 +75,7 @@
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h" />
     <ClInclude Include="unit\backup_test_support.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h" />
+    <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="unit\utf16_offset_test.cpp" />
@@ -86,6 +87,8 @@
     <ClCompile Include="unit\connection_pragma_emit.cpp" />
     <ClCompile Include="unit\domain_types_test.cpp" />
     <ClCompile Include="unit\paragraph_parser_test.cpp" />
+    <ClCompile Include="unit\card_service_test.cpp" />
+    <ClCompile Include="unit\import_pipeline_test.cpp" />
     <ClCompile Include="unit\repositories_test.cpp" />
     <ClCompile Include="unit\repositories_cas_test.cpp" />
     <ClCompile Include="unit\backup_inspection_test.cpp" />
@@ -95,6 +98,7 @@
     <!-- platform 계층은 별도 프로젝트가 아니라 소유 경계다. 필요한 프로젝트가 직접 컴파일한다
          (하네스 소스와 같은 방식). -->
     <ClCompile Include="..\platform\src\win32_file_system.cpp" />
+    <ClCompile Include="..\platform\src\win32_import_support.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
     <ClCompile Include="harness\src\harness_smoke_test.cpp" />
     <ClCompile Include="harness\src\directwrite_imm32_p1_probe.cpp" />

@@ -37,6 +37,9 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h">
+      <Filter>플랫폼</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="unit\utf16_offset_test.cpp">
@@ -66,6 +69,12 @@
     <ClCompile Include="unit\paragraph_parser_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\card_service_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\import_pipeline_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\repositories_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
@@ -85,6 +94,9 @@
       <Filter>단위 시험</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_file_system.cpp">
+      <Filter>플랫폼</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_import_support.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="harness\src\win32_harness.cpp">

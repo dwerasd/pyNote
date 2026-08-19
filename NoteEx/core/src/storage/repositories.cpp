@@ -1852,14 +1852,10 @@ namespace pynote::core::storage
 	// ------------------------------------------------------------------------------------------
 	// 원자적 카드 생성
 	// ------------------------------------------------------------------------------------------
-	E_REPO_RESULT C_REPOSITORIES::CreateCards(
+	E_REPO_RESULT C_REPOSITORIES::validate_create_cards_(
 		const domain::S_NEW_CAPTURE_OPERATION& _Operation,
-		const std::vector<domain::S_NEW_CARD>& _Cards,
-		std::vector<domain::S_CARD>* _pOut)
+		const std::vector<domain::S_NEW_CARD>& _Cards)
 	{
-		_pOut->clear();
-
-		// 네 거절은 전부 트랜잭션을 열기 전이다(:722~737). 순서도 원본 그대로다.
 		if (_Cards.empty())
 		{
 			m_Database.SetLastError("새 카드 저장에는 카드가 한 개 이상 필요합니다.");
@@ -1887,6 +1883,43 @@ namespace pynote::core::storage
 			m_Database.SetLastError("새 입력 분할 작업은 정확한 원문이 필요합니다.");
 			return(E_REPO_RESULT::Invalid);
 		}
+		return(E_REPO_RESULT::Ok);
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::CreateCards(
+		const domain::S_NEW_CAPTURE_OPERATION& _Operation,
+		const std::vector<domain::S_NEW_CARD>& _Cards,
+		std::vector<domain::S_CARD>* _pOut)
+	{
+		_pOut->clear();
+		const E_REPO_RESULT eValidation = this->validate_create_cards_(_Operation, _Cards);
+		if (eValidation != E_REPO_RESULT::Ok) { return(eValidation); }
+
+		C_TRANSACTION Transaction(m_Database);
+		if (!Transaction.IsActive()) { return(this->begin_failed_()); }
+
+		std::vector<domain::S_CARD> CreatedCards;
+		const E_REPO_RESULT eResult = this->CreateCardsInActiveTransaction(_Operation, _Cards, &CreatedCards);
+		if (eResult != E_REPO_RESULT::Ok) { return(eResult); }
+		if (!Transaction.Commit()) { return(E_REPO_RESULT::Failed); }
+
+		*_pOut = std::move(CreatedCards);
+		return(E_REPO_RESULT::Ok);
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::CreateCardsInActiveTransaction(
+		const domain::S_NEW_CAPTURE_OPERATION& _Operation,
+		const std::vector<domain::S_NEW_CARD>& _Cards,
+		std::vector<domain::S_CARD>* _pOut)
+	{
+		_pOut->clear();
+		if (!m_Database.IsOpen() || ::sqlite3_get_autocommit(m_Database.Handle()) != 0)
+		{
+			m_Database.SetLastError("카드 생성 seam은 활성 트랜잭션이 필요합니다.");
+			return(E_REPO_RESULT::Failed);
+		}
+		const E_REPO_RESULT eValidation = this->validate_create_cards_(_Operation, _Cards);
+		if (eValidation != E_REPO_RESULT::Ok) { return(eValidation); }
 
 		domain::S_CAPTURE_OPERATION StoredOperation;
 		StoredOperation.sId          = _Operation.sId;
@@ -1902,9 +1935,6 @@ namespace pynote::core::storage
 		StoredOperation.nCreatedAtUs          = _Operation.nCreatedAtUs;
 
 		std::vector<domain::S_CARD> CreatedCards;
-
-		C_TRANSACTION Transaction(m_Database);
-		if (!Transaction.IsActive()) { return(this->begin_failed_()); }
 
 		E_REPO_RESULT eResult = this->CreateCaptureOperation(StoredOperation);
 		if (eResult != E_REPO_RESULT::Ok) { return(eResult); }
@@ -1969,10 +1999,6 @@ namespace pynote::core::storage
 			LinkedCard.sCurrentRevisionId = NewCard.sRevisionId;
 			CreatedCards.push_back(std::move(LinkedCard));
 		}
-
-		// 커밋 실패 사유는 C_TRANSACTION 이 이미 LastError 에 넣었다. 롤백이 성공하면
-		// sqlite3_errmsg 는 이미 초기화된 뒤라 여기서 다시 읽으면 사유가 지워진다.
-		if (!Transaction.Commit()) { return(E_REPO_RESULT::Failed); }
 
 		*_pOut = std::move(CreatedCards);
 		return(E_REPO_RESULT::Ok);
