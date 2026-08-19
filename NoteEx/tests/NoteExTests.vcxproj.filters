@@ -81,6 +81,9 @@
     <ClCompile Include="unit\draft_coordinator_core_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\save_coordinator_core_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\paragraph_parser_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>

@@ -74,6 +74,7 @@
     <ClInclude Include="include\pynote\core\application\workspace_state.h" />
     <ClInclude Include="include\pynote\core\application\search_result_plan.h" />
     <ClInclude Include="include\pynote\core\application\draft_coordinator.h" />
+    <ClInclude Include="include\pynote\core\application\save_coordinator.h" />
     <ClInclude Include="src\application\python_casefold_15_1.inc" />
     <ClInclude Include="src\domain\enum_spelling.h" />
     <ClInclude Include="src\domain\bundled_tzdata_2026c.h" />
@@ -126,6 +127,7 @@
     <ClCompile Include="src\application\workspace_state.cpp" />
     <ClCompile Include="src\application\search_result_plan.cpp" />
     <ClCompile Include="src\application\draft_coordinator.cpp" />
+    <ClCompile Include="src\application\save_coordinator.cpp" />
     <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
     <ClCompile Include="..\third_party\cctz\src\time_zone_fixed.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
     <ClCompile Include="..\third_party\cctz\src\time_zone_format.cc"><WarningLevel>TurnOffAllWarnings</WarningLevel></ClCompile>
