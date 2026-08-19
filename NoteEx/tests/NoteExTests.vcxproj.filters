@@ -93,6 +93,9 @@
     <ClCompile Include="unit\drop_import_plan_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\drop_import_completion_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\repositories_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
