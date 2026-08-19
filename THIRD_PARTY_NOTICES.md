@@ -28,3 +28,5 @@ Python 실행에 필요한 제3자 구성요소는 하나다.
 - **IANA Time Zone Database 2026c** — public-domain 및 기여자별 고지 조건.
   NoteEx 실행 파일에 포함되는 TZif 자료의 설치 원본 고지는
   `NoteEx/third_party/tzdata/2026c/COPYRIGHT`에 있다.
+- **Unicode Character Database 15.1.0 case-fold data** — Unicode License
+  Agreement. 라이선스 전문은 `NoteEx/third_party/unicode/LICENSE.txt`에 있다.

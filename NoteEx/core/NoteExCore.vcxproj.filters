@@ -74,6 +74,12 @@
     <ClInclude Include="include\pynote\core\application\workspace_state.h">
       <Filter>응용</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\application\search_result_plan.h">
+      <Filter>응용</Filter>
+    </ClInclude>
+    <ClInclude Include="src\application\python_casefold_15_1.inc">
+      <Filter>응용</Filter>
+    </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
       <Filter>도메인</Filter>
     </ClInclude>
@@ -185,6 +191,9 @@
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\workspace_state.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\search_result_plan.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><Filter>third_party</Filter></ClCompile>

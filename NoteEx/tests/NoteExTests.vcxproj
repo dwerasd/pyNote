@@ -89,6 +89,7 @@
     <ClCompile Include="unit\domain_types_test.cpp" />
     <ClCompile Include="unit\date_time_formatter_test.cpp" />
     <ClCompile Include="unit\time_zone_resolver_test.cpp" />
+    <ClCompile Include="unit\search_result_plan_test.cpp" />
     <ClCompile Include="unit\paragraph_parser_test.cpp" />
     <ClCompile Include="unit\card_service_test.cpp" />
     <ClCompile Include="unit\import_pipeline_test.cpp" />

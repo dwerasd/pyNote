@@ -75,6 +75,9 @@
     <ClCompile Include="unit\time_zone_resolver_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\search_result_plan_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\paragraph_parser_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
