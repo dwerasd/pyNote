@@ -75,6 +75,12 @@
     <ClCompile Include="unit\import_pipeline_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\diffing_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\export_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\repositories_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>

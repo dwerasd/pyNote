@@ -31,10 +31,16 @@
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h">
       <Filter>도메인</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\diffing.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
     <ClInclude Include="include\pynote\core\application\card_service.h">
       <Filter>응용</Filter>
     </ClInclude>
     <ClInclude Include="include\pynote\core\application\import_pipeline.h">
+      <Filter>응용</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\application\export.h">
       <Filter>응용</Filter>
     </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
@@ -99,10 +105,16 @@
     <ClCompile Include="src\domain\paragraph_parser.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
+    <ClCompile Include="src\domain\diffing.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
     <ClCompile Include="src\application\card_service.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\import_pipeline.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\export.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\database.cpp">
