@@ -135,7 +135,7 @@ std::vector<std::wstring> small_rows()
 }  // namespace
 
 TEST_CASE("P2 DirectWrite layout preserves wrapping trimming metrics and UTF-16 hit tests",
-          "[P2][layout][lower-floor]")
+          "[P2][layout][lower-floor][T4A-UNC-011][T4A-UNC-012]")
 {
     harness::P2CardListPrototype prototype;
     REQUIRE(prototype.ready());
@@ -238,7 +238,7 @@ TEST_CASE("P2 virtual card list generates and reaches 10000 fixed rows below ten
 }
 
 TEST_CASE("P2 HWND consumes WM_DPICHANGED at 96 and 144 DPI in DIP coordinates",
-          "[P2][dpi][lower-floor]")
+          "[P2][dpi][lower-floor][T4A-UNC-008]")
 {
     harness::P2CardListPrototype prototype(640, 480);
     REQUIRE(prototype.ready());

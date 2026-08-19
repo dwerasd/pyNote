@@ -1,4 +1,4 @@
-#include <pynote/harness/rich_edit_p1_probe.h>
+﻿#include <pynote/harness/rich_edit_p1_probe.h>
 
 #include <imm.h>
 #include <richedit.h>

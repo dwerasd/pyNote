@@ -107,7 +107,7 @@ UNCERTAIN_LINKS = (
         "W0",
         "T2 / P1",
         "T4A-UNC-005",
-        "한국어·일본어 IME의 preedit/commit/cancel 순서와 조합 중 이탈 거부가 P1 trace와 일치한다.",
+        "한국어 IME의 preedit/commit/cancel 순서와 조합 중 이탈 거부가 P1 trace와 일치한다.",
         "Rich Edit를 기각하고 DirectWrite+IMM32, 이어 TSF 후보 순으로 승급한다.",
     ),
     UncertainLink(

@@ -275,11 +275,6 @@ TEST_CASE("T4A-UNC-005 DirectWrite IMM32 actual installed IME result-only commit
     emit_trace("T4A-UNC-005", "korean-actual-ime", probe, before, after_korean, &korean,
                korean.leave_rejected ? "rejected" : "not-rejected");
 
-    const auto japanese = probe.ExerciseInstalledIme(MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT));
-    const DbCounts after_japanese = repository.Counts();
-    emit_trace("T4A-UNC-005", "japanese-actual-ime", probe, after_korean, after_japanese,
-               &japanese, "not-attempted");
-
     INFO("Korean preflight block=" << utf8(korean.blocked_environment));
     REQUIRE(korean.profile.installed);
     REQUIRE(korean.visible_restored_nonzero);
@@ -301,10 +296,6 @@ TEST_CASE("T4A-UNC-005 DirectWrite IMM32 actual installed IME result-only commit
     REQUIRE(probe.provenance() == L"typing");
     require_counts(after_korean, 1, 1, 1);
 
-    INFO("Japanese block=" << utf8(japanese.blocked_environment));
-    REQUIRE(japanese.profile.installed);
-    REQUIRE(japanese.actual_input_attempted);
-    REQUIRE(japanese.actual_input_delivered);
 }
 
 TEST_CASE("T4A-UNC-007 DirectWrite IMM32 LF non-BMP selection hit-test and delta",

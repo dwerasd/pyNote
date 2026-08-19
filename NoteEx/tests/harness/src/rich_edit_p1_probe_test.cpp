@@ -1,4 +1,4 @@
-#include <catch_amalgamated.hpp>
+﻿#include <catch_amalgamated.hpp>
 
 #include <pynote/harness/rich_edit_p1_probe.h>
 
