@@ -28,6 +28,9 @@
     <ClInclude Include="include\pynote\core\domain\models.h">
       <Filter>도메인</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\domain\date_time_formatter.h">
+      <Filter>도메인</Filter>
+    </ClInclude>
     <ClInclude Include="include\pynote\core\domain\paragraph_parser.h">
       <Filter>도메인</Filter>
     </ClInclude>
@@ -121,6 +124,9 @@
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\domain\models.cpp">
+      <Filter>도메인</Filter>
+    </ClCompile>
+    <ClCompile Include="src\domain\date_time_formatter.cpp">
       <Filter>도메인</Filter>
     </ClCompile>
     <ClCompile Include="src\domain\paragraph_parser.cpp">

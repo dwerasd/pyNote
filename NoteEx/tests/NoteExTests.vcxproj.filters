@@ -66,6 +66,9 @@
     <ClCompile Include="unit\domain_types_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\date_time_formatter_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\paragraph_parser_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
