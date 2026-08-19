@@ -77,6 +77,9 @@
     <ClInclude Include="include\pynote\core\application\search_result_plan.h">
       <Filter>응용</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\application\draft_coordinator.h">
+      <Filter>응용</Filter>
+    </ClInclude>
     <ClInclude Include="src\application\python_casefold_15_1.inc">
       <Filter>응용</Filter>
     </ClInclude>
@@ -194,6 +197,9 @@
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\search_result_plan.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\draft_coordinator.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><Filter>third_party</Filter></ClCompile>
