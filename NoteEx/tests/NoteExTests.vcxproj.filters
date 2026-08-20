@@ -34,6 +34,9 @@
     <ClInclude Include="unit\backup_test_support.h">
       <Filter>단위 시험</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h">
+      <Filter>플랫폼</Filter>
+    </ClInclude>
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
@@ -147,7 +150,13 @@
     <ClCompile Include="unit\backup_split_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\win32_device_settings_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="..\platform\src\win32_file_system.cpp">
+      <Filter>플랫폼</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_device_settings.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_import_support.cpp">

@@ -74,6 +74,7 @@
     <ClInclude Include="harness\include\pynote\harness\rich_edit_p1_probe.h" />
     <ClInclude Include="harness\include\pynote\harness\win32_harness.h" />
     <ClInclude Include="unit\backup_test_support.h" />
+    <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h" />
@@ -113,9 +114,11 @@
     <ClCompile Include="unit\backup_create_test.cpp" />
     <ClCompile Include="unit\backup_restore_test.cpp" />
     <ClCompile Include="unit\backup_split_test.cpp" />
+    <ClCompile Include="unit\win32_device_settings_test.cpp" />
     <!-- platform 계층은 별도 프로젝트가 아니라 소유 경계다. 필요한 프로젝트가 직접 컴파일한다
          (하네스 소스와 같은 방식). -->
     <ClCompile Include="..\platform\src\win32_file_system.cpp" />
+    <ClCompile Include="..\platform\src\win32_device_settings.cpp" />
     <ClCompile Include="..\platform\src\win32_import_support.cpp" />
     <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />

@@ -20,6 +20,12 @@
 #include "Resource.h"
 
 
+namespace pynote::platform
+{
+	class C_WIN32_DEVICE_SETTINGS;
+}
+
+
 // 메인 프레임 창. DBGView 의 C_MAIN 스타일(C_SINGLETON + WTL CAppModule/CMessageLoop +
 // Init/Display/Destroy)을 그대로 따르는 초기 골격이다.
 // 본문은 D2D 로 그린다 - 카드 목록/에디터는 이 렌더 경로 위에 올린다.
@@ -32,6 +38,7 @@ private:
 
 	CAppModule		m_Module;
 	CMessageLoop	m_MsgLoop;
+	pynote::platform::C_WIN32_DEVICE_SETTINGS* m_pSettings{ nullptr };
 
 	// D2D 자원. 디바이스/브러시/텍스트는 창 간 공유 대상이고, 스왑타겟은 창별로 하나다.
 	d2d::C_D2D_DEVICE		m_d2dDevice;
@@ -50,7 +57,7 @@ public:
 	C_MAIN();
 	~C_MAIN();
 
-	bool Init(HINSTANCE _hInstance);
+	bool Init(HINSTANCE _hInstance, pynote::platform::C_WIN32_DEVICE_SETTINGS* _pSettings);
 	int  Display();
 	void Destroy();
 

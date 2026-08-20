@@ -4,6 +4,9 @@
 #include "framework.h"
 #include "CMain.h"
 
+#include "pynote/platform/win32_device_settings.h"
+#include "pynote/platform/win32_file_system.h"
+
 
 dk::C_CONFIG* g_pConfig = nullptr;
 dk::C_LOG* g_pLog = nullptr;
@@ -14,8 +17,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE _hInstance, _In_opt_ HINSTANCE _hPrevInstan
 	UNREFERENCED_PARAMETER(_lpCmdLine);
 	UNREFERENCED_PARAMETER(_nCmdShow);
 
+	pynote::platform::C_WIN32_FILE_SYSTEM FileSystem;
+	pynote::platform::C_WIN32_DEVICE_SETTINGS Settings(FileSystem);
+	if (!Settings.Initialize()) { return(1); }
+
 	C_MAIN cMain;
-	if (cMain.Init(_hInstance))
+	if (cMain.Init(_hInstance, &Settings))
 	{
 		cMain.Display();
 	}

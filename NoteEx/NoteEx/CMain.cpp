@@ -1,7 +1,7 @@
 ﻿#include "framework.h"
 #include "CMain.h"
 
-#include <string>
+#include "pynote/platform/win32_device_settings.h"
 
 
 C_MAIN::C_MAIN()
@@ -16,31 +16,33 @@ void C_MAIN::save_rect()
 {
 	// 최소화 상태의 좌표는 복원에 쓸 수 없는 값이라 저장하지 않는다.
 	if (this->IsIconic()) { return; }
-	if (!g_pConfig) { return; }
+	if (!m_pSettings) { return; }
 
 	RECT rc{};
 	this->GetWindowRect(&rc);
 
-	LPCWSTR pPath = g_pConfig->get_config_path();
-	::WritePrivateProfileStringW(L"location", L"x", std::to_wstring(rc.left).c_str(), pPath);
-	::WritePrivateProfileStringW(L"location", L"y", std::to_wstring(rc.top).c_str(), pPath);
-	::WritePrivateProfileStringW(L"location", L"w", std::to_wstring(rc.right - rc.left).c_str(), pPath);
-	::WritePrivateProfileStringW(L"location", L"h", std::to_wstring(rc.bottom - rc.top).c_str(), pPath);
+	m_pSettings->SetInt("location/x", rc.left);
+	m_pSettings->SetInt("location/y", rc.top);
+	m_pSettings->SetInt("location/w", rc.right - rc.left);
+	m_pSettings->SetInt("location/h", rc.bottom - rc.top);
+	if (!m_pSettings->Sync()) { DBGPRINT(L"창 위치 저장 실패"); }
 }
 
 void C_MAIN::move_rect()
 {
-	if (!g_pConfig) { return; }
-
 	RECT rc{};
 	this->GetWindowRect(&rc);
 
-	LPCWSTR pPath = g_pConfig->get_config_path();
-
-	const int nW = ::GetPrivateProfileIntW(L"location", L"w", rc.right - rc.left, pPath);
-	const int nH = ::GetPrivateProfileIntW(L"location", L"h", rc.bottom - rc.top, pPath);
-	const int nX = ::GetPrivateProfileIntW(L"location", L"x", (::GetSystemMetrics(SM_CXSCREEN) - nW) / 2, pPath);
-	const int nY = ::GetPrivateProfileIntW(L"location", L"y", (::GetSystemMetrics(SM_CYSCREEN) - nH) / 2, pPath);
+	const int nDefaultW = rc.right - rc.left;
+	const int nDefaultH = rc.bottom - rc.top;
+	const int nW = m_pSettings ? m_pSettings->GetInt("location/w", nDefaultW) : nDefaultW;
+	const int nH = m_pSettings ? m_pSettings->GetInt("location/h", nDefaultH) : nDefaultH;
+	const int nX = m_pSettings
+		? m_pSettings->GetInt("location/x", (::GetSystemMetrics(SM_CXSCREEN) - nW) / 2)
+		: (::GetSystemMetrics(SM_CXSCREEN) - nW) / 2;
+	const int nY = m_pSettings
+		? m_pSettings->GetInt("location/y", (::GetSystemMetrics(SM_CYSCREEN) - nH) / 2)
+		: (::GetSystemMetrics(SM_CYSCREEN) - nH) / 2;
 
 	this->MoveWindow(nX, nY, nW, nH);
 }
@@ -72,16 +74,17 @@ void C_MAIN::render_()
 	}
 }
 
-bool C_MAIN::Init(HINSTANCE _hInstance)
+bool C_MAIN::Init(HINSTANCE _hInstance, pynote::platform::C_WIN32_DEVICE_SETTINGS* _pSettings)
 {
 	bool bResult = false;
 	do
 	{
 		DBGPRINT(L"C_MAIN::Init(start)");
 		m_hInst = _hInstance;
+		m_pSettings = _pSettings;
+		if (!m_pSettings) { break; }
 
 		if (!g_pLog) { g_pLog = new dk::C_LOG(L"log-NoteEx"); }
-		if (!g_pConfig) { g_pConfig = new dk::C_CONFIG(); }
 
 		// WTL 초기화
 		this->m_Module.Init(nullptr, m_hInst);

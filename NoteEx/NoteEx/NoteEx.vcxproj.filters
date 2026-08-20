@@ -27,12 +27,24 @@
     <ClInclude Include="CMain.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CMain.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="WinMain.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_device_settings.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_file_system.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
