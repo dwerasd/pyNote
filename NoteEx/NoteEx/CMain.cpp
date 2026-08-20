@@ -118,6 +118,11 @@ int C_MAIN::Display()
 	return(m_MsgLoop.Run());
 }
 
+void C_MAIN::RequestNewWindow()
+{
+	if (::IsWindow(this->m_hWnd)) { this->PostMessageW(WM_NOTEEX_NEW_WINDOW); }
+}
+
 void C_MAIN::Destroy()
 {
 	DBGPRINT(L"C_MAIN::Destroy(start)");
@@ -209,6 +214,15 @@ LRESULT C_MAIN::OnPaint(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, 
 	this->GetClientRect(&rc);
 	dc.FillSolidRect(&rc, ::GetSysColor(COLOR_WINDOW));
 
+	return(0);
+}
+
+LRESULT C_MAIN::OnNewWindow(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled)
+{
+	if (this->IsIconic()) { this->ShowWindow(SW_RESTORE); }
+	else { this->ShowWindow(SW_SHOW); }
+	::SetForegroundWindow(this->m_hWnd);
+	_bHandled = TRUE;
 	return(0);
 }
 

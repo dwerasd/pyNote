@@ -34,6 +34,8 @@ class C_MAIN
 	, public CFrameWindowImpl<C_MAIN>
 {
 private:
+	static constexpr UINT WM_NOTEEX_NEW_WINDOW = WM_APP + 1;
+
 	HINSTANCE		m_hInst{ nullptr };
 
 	CAppModule		m_Module;
@@ -60,6 +62,7 @@ public:
 	bool Init(HINSTANCE _hInstance, pynote::platform::C_WIN32_DEVICE_SETTINGS* _pSettings);
 	int  Display();
 	void Destroy();
+	void RequestNewWindow();
 
 	BEGIN_MSG_MAP(C_MAIN)
 		MESSAGE_HANDLER(WM_CREATE, OnCreate)
@@ -68,6 +71,7 @@ public:
 		MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
 		MESSAGE_HANDLER(WM_SIZE, OnSize)
 		MESSAGE_HANDLER(WM_PAINT, OnPaint)
+		MESSAGE_HANDLER(WM_NOTEEX_NEW_WINDOW, OnNewWindow)
 		COMMAND_ID_HANDLER(IDM_EXIT, OnMenuExit)
 		COMMAND_ID_HANDLER(IDM_ABOUT, OnMenuAbout)
 		CHAIN_MSG_MAP(CFrameWindowImpl<C_MAIN>)
@@ -80,6 +84,7 @@ public:
 	LRESULT OnEraseBkgnd(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& /*_bHandled*/) { return(1); }
 	LRESULT OnSize(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
 	LRESULT OnPaint(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& /*_bHandled*/);
+	LRESULT OnNewWindow(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
 	LRESULT OnMenuExit(WORD /*_wNotifyCode*/, WORD /*_wID*/, HWND /*_hWndCtl*/, BOOL& /*_bHandled*/);
 	LRESULT OnMenuAbout(WORD /*_wNotifyCode*/, WORD /*_wID*/, HWND /*_hWndCtl*/, BOOL& /*_bHandled*/);
 };

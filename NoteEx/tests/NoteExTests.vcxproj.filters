@@ -43,6 +43,9 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_single_instance.h">
+      <Filter>플랫폼</Filter>
+    </ClInclude>
     <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
@@ -153,6 +156,9 @@
     <ClCompile Include="unit\win32_device_settings_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\win32_single_instance_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="..\platform\src\win32_file_system.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
@@ -160,6 +166,9 @@
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_import_support.cpp">
+      <Filter>플랫폼</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_single_instance.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp">
