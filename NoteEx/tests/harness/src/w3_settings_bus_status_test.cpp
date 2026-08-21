@@ -205,10 +205,11 @@ TEST_CASE("PLAN-W3-0045 page content publish composes exact card and character s
 	// 저장 상태 규칙(원본 main_window.py:723~729): 세션이 존재하고 dirty 또는 저장
 	// 실패일 때만 편집기 상태 문자열이고, 세션이 없으면 조건 자체가 성립하지 않는다.
 	REQUIRE(shell::ComposeSaveStateText(true, true, false) == std::wstring(L"편집 중"));
-	REQUIRE(shell::ComposeSaveStateText(true, false, true) ==
-		std::wstring(L"저장 실패 — 다시 시도"));
-	REQUIRE(shell::ComposeSaveStateText(true, true, true) ==
-		std::wstring(L"저장 실패 — 다시 시도"));
+	// REQUIRE 는 식 원문을 narrow 리터럴로 stringify 하므로 CP949 밖 문자(U+2014)가 식 안에
+	// 있으면 C4566 — 기대 문자열은 식 밖 상수로 둔다.
+	const std::wstring sSaveFailed = L"저장 실패 — 다시 시도";
+	REQUIRE(shell::ComposeSaveStateText(true, false, true) == sSaveFailed);
+	REQUIRE(shell::ComposeSaveStateText(true, true, true) == sSaveFailed);
 	REQUIRE(shell::ComposeSaveStateText(false, true, true) ==
 		std::wstring(L"모든 변경 저장됨"));
 	REQUIRE(shell::ComposeSaveStateText(true, false, false) ==
@@ -387,10 +388,11 @@ TEST_CASE("CAP-PL-009 external document removal classifies save and no-save bran
 TEST_CASE("CAP-FI-015 window title composes document title with application name",
 	"[W3-settings-bus-status][WTL-CAP-FI-015]")
 {
-	REQUIRE(shell::ComposeWindowTitle(std::optional<std::wstring>(L"회의록")) ==
-		std::wstring(L"회의록 — pyNote"));
-	REQUIRE(shell::ComposeWindowTitle(std::optional<std::wstring>(L"Note 1")) ==
-		std::wstring(L"Note 1 — pyNote"));
+	// 기대 문자열을 식 밖에 두는 이유는 저장 상태 블록과 같다(REQUIRE stringify + U+2014).
+	const std::wstring sMeetingTitle = L"회의록 — pyNote";
+	const std::wstring sNoteTitle = L"Note 1 — pyNote";
+	REQUIRE(shell::ComposeWindowTitle(std::optional<std::wstring>(L"회의록")) == sMeetingTitle);
+	REQUIRE(shell::ComposeWindowTitle(std::optional<std::wstring>(L"Note 1")) == sNoteTitle);
 	REQUIRE(shell::ComposeWindowTitle(std::nullopt) == std::wstring(L"pyNote"));
 	// 활성 문서가 없는 창의 상태 바 문안도 같은 자리에서 굳힌다(원본 :714).
 	REQUIRE(shell::ComposeEmptyStatusText() ==

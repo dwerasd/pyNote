@@ -1,4 +1,4 @@
-#include "CDocumentPage.h"
+﻿#include "CDocumentPage.h"
 
 #ifdef CreateEvent
 #undef CreateEvent
@@ -181,6 +181,19 @@ struct C_DOCUMENT_PAGE::S_STATE
 		return(true);
 	}
 
+	// 기동 복구 처분의 W3 자리(원본 app.py:893 _resolve_startup_recovery → main_window.py:994
+	// _startup_suppressed_card_ids): 복구 프롬프트(CAP-FI-013)는 W6 소유라 아직 없으므로 후보
+	// 전건을 LATER 로 처분한 것과 같게 — 후보 카드의 편집기 복원을 억제해 초안을 DB 에 보존한다.
+	// nullopt = 후보 조회 저장소 실패(원본은 예외로 기동을 닫는다).
+	// CEILING: W6 에서 프롬프트 결과(RECOVER/DISCARD/LATER)의 앱 수준 억제 집합으로 대체.
+	std::optional<bool> editor_restore_suppressed(const std::string& _sCardId)
+	{
+		const auto Candidates = pDraftCoordinator->RecoveryCandidates(sDocumentId);
+		if (Candidates.eOutcome != app::E_DRAFT_OUTCOME::Ok) { return(std::nullopt); }
+		return(std::any_of(Candidates.Candidates.begin(), Candidates.Candidates.end(),
+			[&_sCardId](const app::S_DRAFT_RECOVERY_CANDIDATE& _Candidate) { return(_Candidate.Draft.sCardId == _sCardId); }));
+	}
+
 	bool open_card(const std::string& _sCardId, bool _bReplaceEditor)
 	{
 		if (sDraftId && sCurrentCardId == _sCardId) { ::SetFocus(hEditor); return(true); }
@@ -348,8 +361,22 @@ bool C_DOCUMENT_PAGE::Init(
 		static_cast<WPARAM>((std::max<std::int64_t>)(0, UiState.nListScrollPosition)), 0);
 	if (UiState.sEditorCardId)
 	{
-		if (!State.open_card(*UiState.sEditorCardId, true)) { this->Cleanup(); return(false); }
-		if (UiState.nEditorCursorQchar) { State.set_editor_text(State.editor_text(), *UiState.nEditorCursorQchar); }
+		const auto Suppressed = State.editor_restore_suppressed(*UiState.sEditorCardId);
+		if (!Suppressed) { this->Cleanup(); return(false); }
+		domain::S_CARD EditorCard;
+		const auto eCard = State.pRepositories->GetCard(*UiState.sEditorCardId, &EditorCard);
+		if (eCard != storage::E_REPO_RESULT::Ok && eCard != storage::E_REPO_RESULT::NotFound)
+		{
+			this->Cleanup();
+			return(false);
+		}
+		// 원본 main_window.py:992~998: LATER 억제 카드가 아니고 카드가 살아 있을 때만 편집기를
+		// 복원한다. 사라진·삭제된 카드는 복원만 건너뛴다(창 생성 실패가 아니다).
+		if (!*Suppressed && eCard == storage::E_REPO_RESULT::Ok && !EditorCard.nDeletedAtUs)
+		{
+			if (!State.open_card(*UiState.sEditorCardId, true)) { this->Cleanup(); return(false); }
+			if (UiState.nEditorCursorQchar) { State.set_editor_text(State.editor_text(), *UiState.nEditorCursorQchar); }
+		}
 	}
 	this->Layout();
 	::SetFocus(State.hEditor);

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <windows.h>
 
@@ -18,6 +18,7 @@ namespace pynote::shell
 	// 의미대로 창 수준 단축키가 닿지 않는다).
 	bool RouteFrameMessage(MSG* _pMessage, HWND _hFrame,
 		const std::function<bool(MSG*)>& _PreTranslate, HACCEL _hAccelerator);
+}
 
 class C_DOCUMENT_LIST_SHELL final
 {

@@ -1,4 +1,4 @@
-#include "targetver.h"
+﻿#include "targetver.h"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "CWindowLayout.h"

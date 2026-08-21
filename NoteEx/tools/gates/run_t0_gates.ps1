@@ -13,17 +13,21 @@
 
 [CmdletBinding()]
 param(
-    [string] $LogDir = 'D:\Sources\python\pyNote\scratchpad\orchestration\wtl-port\logs',
+    [string] $RepoRoot = '',
+    [string] $LogDir = '',
     [string] $Prefix = 'T0G',
     [string] $MSBuild = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\amd64\MSBuild.exe',
-    [string] $DumpBin = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe'
+    [string] $DumpBin = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe',
+    [string] $Python = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot  = 'D:\Sources\python\pyNote'
+# D-09 경로 파라미터화: 미지정 시 스크립트 위치 기준 자동탐지 — 게이트 semantics 불변, 경로만.
+$repoRoot  = if ($RepoRoot) { $RepoRoot } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $noteExDir = Join-Path $repoRoot 'NoteEx'
-$python    = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$python    = if ($Python) { $Python } else { Join-Path $repoRoot '.venv\Scripts\python.exe' }
+if (-not $LogDir) { $LogDir = Join-Path $repoRoot 'scratchpad\orchestration\wtl-port\logs' }
 $gatesDir  = Join-Path $noteExDir 'tools\gates'
 $smoke     = Join-Path $gatesDir 'shell_smoke.ps1'
 $outDir    = Join-Path $noteExDir 'x64\ReleaseMD'

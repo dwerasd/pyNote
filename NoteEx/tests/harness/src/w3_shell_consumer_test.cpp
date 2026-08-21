@@ -550,3 +550,40 @@ TEST_CASE("CAP-FI-035 structured page state survives actual reopen",
 	REQUIRE(::SendMessageW(Reopened.CardListHwnd(), LB_GETCURSEL, 0, 0) == 0);
 	REQUIRE(Reopened.PersistState(std::pair(321, 643)));
 }
+
+// 대응 원본: tests/ui/test_main_window_integration.py::test_later_suppression_user_reselection_follows_three_choices[later]
+// (PLAN-W6-0055 — 복구 프롬프트 3지선다 자체는 W6 소유). 여기서는 W3 셸이 프롬프트 없이 후보 전건을
+// LATER 로 처분한다는 경계만 고정한다: 저장된 편집기 카드에 edit 초안이 남아 있으면 재개방이 실패하지
+// 않고(원본 main_window.py:994 _startup_suppressed_card_ids), 편집기 복원만 건너뛰며 초안은 DB 에 남는다.
+// 실측 2026-08-21: 이 억제가 없으면 OpenCard→NoOp 을 실패로 읽어 창 생성이 죽고 기동이 ExitCode=1 로 끝났다.
+TEST_CASE("CAP-FI-035 persisted edit draft on the saved editor card defers editor restore on reopen",
+	"[W3-shell-spine][WTL-CAP-FI-035]")
+{
+	C_PAGE_FIXTURE Fixture;
+	auto& Page = Fixture.Page();
+	Fixture.Paste(L"draft body");
+	REQUIRE(Page.Save());
+	const auto Card = Fixture.Card();
+	REQUIRE(Card.sCurrentRevisionId.has_value());
+	REQUIRE(Page.PersistState(std::nullopt));
+	domain::S_DRAFT Draft;
+	Draft.sId = "later-switch-draft";
+	Draft.sDocumentId = C_PAGE_FIXTURE::DocumentId;
+	Draft.sCardId = Card.sId;
+	Draft.eDraftKind = domain::E_DRAFT_KIND::Edit;
+	Draft.sBaseRevisionId = Card.sCurrentRevisionId;
+	Draft.sDraftText = "draft body pending";
+	Draft.sDraftHash = storage::TextHash(Draft.sDraftText);
+	Draft.nCursorPositionQchar = 4;
+	Draft.nUpdatedAtUs = 3000;
+	REQUIRE(Fixture.Repositories().CreateDraft(Draft) == storage::E_REPO_RESULT::Ok);
+	Fixture.RecreatePage();
+	auto& Reopened = Fixture.Page();
+	REQUIRE_FALSE(Reopened.HasSession());
+	REQUIRE(window_text(Reopened.EditorHwnd()).empty());
+	REQUIRE(::SendMessageW(Reopened.CardListHwnd(), LB_GETCURSEL, 0, 0) == 0);
+	std::vector<domain::S_DRAFT> Drafts;
+	REQUIRE(Fixture.Repositories().ListDrafts(C_PAGE_FIXTURE::DocumentId, &Drafts) == storage::E_REPO_RESULT::Ok);
+	REQUIRE(Drafts.size() == 1);
+	REQUIRE(Drafts.front().sId == "later-switch-draft");
+}

@@ -1,4 +1,4 @@
-#include "CSearchDialog.h"
+﻿#include "CSearchDialog.h"
 
 #include "Resource.h"
 
