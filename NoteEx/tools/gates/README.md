@@ -617,3 +617,39 @@ python tools/gates/check_connection_parity.py
 
 정규화 규칙은 이 모듈이 아니라 **각 게이트의 docstring** 이 소유한다. 읽는 사람이 규칙을
 찾을 자리는 게이트 문서이지 구현이 아니다.
+
+# 셸 실기동 게이트 (shell_smoke.ps1 — T0 일괄 실행기 09~12)
+
+`shell_smoke.ps1` 은 실제 `NoteEx.exe` 를 띄워 **창이 뜨고(제목 일치), 정상 종료되고(CloseMainWindow → rc 0),
+INI 가 재생성되는지**를 보는 양방향 프로브다. `run_t0_gates.ps1` 이 09(known-good)·10(창 없음)·11(INI 미기록)·
+12(실행 파일 부재) 네 번 부른다.
+
+## W3 계약 (2026-08-21 개정, 사용자 A 확정)
+
+W0 계약(인자 없는 기동 → 제목 `NoteEx` → exe 옆 `.ini`)은 W3 셸과 어긋났다 — 제목은 `<문서 제목> — pyNote`, INI 는
+`%LOCALAPPDATA%\pyNote\pyNote\NoteEx.ini`, 그리고 **인자 없는 기동은 사용자 기본 DB(`%APPDATA%\pyNote\pyNote\pynote.sqlite3`)를 연다.**
+게이트가 실데이터를 여는 구조를 끊기 위해 두 인자를 추가했다.
+
+- `-Database <path>`: 앱에 `--database="<path>"` 로 넘기는 격리 DB. 부모 디렉터리를 만들어 준다.
+- `-LocalAppData <dir>`: 자식 프로세스의 `LOCALAPPDATA` 를 이 임시 루트로 바꾼다(앱 INI·로컬 상태가 여기로 간다).
+- `-IniPath` 는 종전대로 **명시**한다(격리 루트 안 `pyNote\pyNote\NoteEx.ini`). `-ExpectedTitle` 은 빈 DB 첫 문서 제목 `Note 1 — pyNote`.
+- 둘 다 비우면 W0 계약 그대로 돈다(하위 호환) — 단 T0 실행기는 항상 격리 인자를 넘긴다.
+
+실행기는 실행마다 `%TEMP%\NoteEx-T0-shell-<guid>\{db,local}` 을 만들고 끝에 지운다(트랜스크립트에 정리 결과 기록).
+10번(`-Exe NoteExTests.exe`)은 창이 없으니 격리 인자 없이 rc=1, 11번은 격리 DB 로 **앱은 정상 기동·종료**하되
+`-IniPath` 를 없는 경로로 줘 INI 술어에서만 rc=1 — 이제야 INI 분기 자체의 판별력을 시험한다(종전엔 제목 불일치로
+먼저 떨어져 공허했다). 12번은 실행 파일 부재 rc=2.
+
+## 실행
+
+```powershell
+pwsh -NoProfile -File tools/gates/shell_smoke.ps1 -Database $env:TEMP\x\db\p.sqlite3 -LocalAppData $env:TEMP\x\local -IniPath $env:TEMP\x\local\pyNote\pyNote\NoteEx.ini -ExpectedTitle 'Note 1 — pyNote'
+pwsh -NoProfile -File tools/gates/run_t0_gates.ps1   # 13게이트 일괄, 셸 프로브 격리 루트 자동
+```
+
+## 실패는 무슨 뜻인가
+
+- 09 rc=1 `창 생성 전 종료` — 기동 즉사(2026-08-21 실측: 초안 잔존 시 `OpenCard`→`NoOp` 오판이 원인이었다). 먼저 `--database` 를 새 임시 경로로 바꿔 재현 여부를 가른다.
+- 09 rc=1 `창 제목 불일치` — 제목 조립(`ComposeWindowTitle`) 또는 첫 문서 제목 규칙이 바뀐 것. `-ExpectedTitle` 을 바꾸는 것은 계약 개정이다(이 절 갱신 + 사용자 확인).
+- 09 rc=1 `INI 가 재생성되지 않았다` — INI 위치 계약이 바뀐 것(`-IniPath` 와 앱 D8 설정 경로 대조).
+- 11 rc=0 — INI 분기 판별력 상실(없는 경로를 줬는데 통과) — 게이트 결함.

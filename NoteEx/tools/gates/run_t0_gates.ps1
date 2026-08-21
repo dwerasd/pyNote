@@ -43,6 +43,17 @@ if (-not (Test-Path -LiteralPath $LogDir)) {
     exit 2
 }
 
+# 셸 프로브(09~11)는 W3 계약으로 돈다(2026-08-21, 사용자 A 확정): 실행마다 임시 루트 아래 격리 DB 와
+# 임시 LOCALAPPDATA 를 만들어 앱이 사용자 실데이터(%APPDATA% 기본 DB·%LOCALAPPDATA% INI)를 열지 않게
+# 하고, 제목은 빈 DB 첫 문서 `Note 1 — pyNote`, INI 는 격리 루트 안 경로를 명시한다. 루트는 끝에 지운다.
+$shellRoot  = Join-Path ([System.IO.Path]::GetTempPath()) ('NoteEx-T0-shell-' + [guid]::NewGuid().ToString('N'))
+$shellLocal = Join-Path $shellRoot 'local'
+$shellDb    = Join-Path $shellRoot 'db\primary.sqlite3'
+$shellIni   = Join-Path $shellLocal 'pyNote\pyNote\NoteEx.ini'
+$shellTitle = 'Note 1 — pyNote'
+New-Item -ItemType Directory -Path $shellLocal -Force | Out-Null
+New-Item -ItemType Directory -Path (Split-Path -Parent $shellDb) -Force | Out-Null
+
 # id / 이름 / 작업 디렉터리 / 실행 파일 / 인자 / 기대 종료코드
 $gates = @(
     @{ id = '01'; name = 'ReleaseMD|x64 클린 리빌드';                cwd = $noteExDir; exe = $MSBuild; args = @('NoteEx.sln', '/t:Rebuild', '/p:Configuration=ReleaseMD;Platform=x64'); expect = 0 }
@@ -53,9 +64,9 @@ $gates = @(
     @{ id = '06'; name = '스키마 동등성 자기시험';                    cwd = $repoRoot;  exe = $python; args = @((Join-Path $gatesDir 'check_schema_parity.py'), '--self-test'); expect = 0 }
     @{ id = '07'; name = '스키마 동등성 실대조(공개 소비 smoke)';     cwd = $repoRoot;  exe = $python; args = @((Join-Path $gatesDir 'check_schema_parity.py')); expect = 0 }
     @{ id = '08'; name = '시험 추적성';                               cwd = $repoRoot;  exe = $python; args = @((Join-Path $gatesDir 'check_test_traceability.py')); expect = 0 }
-    @{ id = '09'; name = '셸 실기동/INI known-good';                  cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke); expect = 0 }
+    @{ id = '09'; name = '셸 실기동/INI known-good(격리 DB)';         cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-Database', $shellDb, '-LocalAppData', $shellLocal, '-IniPath', $shellIni, '-ExpectedTitle', $shellTitle); expect = 0 }
     @{ id = '10'; name = '셸 프로브 known-bad: 창 없음';              cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-Exe', (Join-Path $outDir 'NoteExTests.exe'), '-WindowWaitMs', '3000'); expect = 1 }
-    @{ id = '11'; name = '셸 프로브 known-bad: INI 미기록';           cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-IniPath', (Join-Path $outDir 'NoteEx.seeded-absent.ini')); expect = 1 }
+    @{ id = '11'; name = '셸 프로브 known-bad: INI 미기록';           cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-Database', $shellDb, '-LocalAppData', $shellLocal, '-ExpectedTitle', $shellTitle, '-IniPath', (Join-Path $outDir 'NoteEx.seeded-absent.ini')); expect = 1 }
     @{ id = '12'; name = '셸 프로브 known-bad: 실행 파일 부재';       cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-Exe', (Join-Path $outDir 'NoSuchBinary.exe')); expect = 2 }
     @{ id = '13'; name = '배포 의존성 dumpbin /dependents';           cwd = $noteExDir; exe = $DumpBin; args = @('/dependents', (Join-Path $outDir 'NoteEx.exe')); expect = 0 }
 )
@@ -121,6 +132,10 @@ $rows.Add(('종료(로컬): {0}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')))
 $rows.Add(('불일치 게이트: {0}건' -f $failed))
 $rows.Add('')
 $rows.Add('## 게이트별 상세')
+$rows.Add('')
+
+if (Test-Path -LiteralPath $shellRoot) { Remove-Item -LiteralPath $shellRoot -Recurse -Force -ErrorAction SilentlyContinue }
+$rows.Add(('셸 프로브 임시 루트 정리: {0} (잔존={1})' -f $shellRoot, (Test-Path -LiteralPath $shellRoot)))
 $rows.Add('')
 
 Set-Content -LiteralPath $transcript -Value ($rows + $detail) -Encoding utf8NoBOM

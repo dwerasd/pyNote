@@ -17,7 +17,12 @@ param(
     [int]    $WindowWaitMs = 10000,
     [int]    $ExitWaitMs   = 8000,
     [int]    $KillWaitMs   = 3000,
-    [string] $ExpectedTitle = 'NoteEx'
+    [string] $ExpectedTitle = 'NoteEx',
+    # W3 계약(2026-08-21, 사용자 A 확정): 게이트는 사용자 실데이터를 열지 않는다 — -Database 는 앱에
+    # `--database=<path>` 로 넘기는 격리 DB 경로이고, -LocalAppData 는 앱 INI·로컬 상태가 가는 LOCALAPPDATA
+    # 를 자식 프로세스에만 바꿔 끼우는 임시 루트다. 둘 다 비우면 W0 계약(인자 없는 기동)대로 돈다.
+    [string] $Database = '',
+    [string] $LocalAppData = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,8 +63,27 @@ Write-Output '[준비] INI 존재: False'
 $proc = $null
 $verdict = 1
 try {
-    Write-Output ("`$ Start-Process {0} -PassThru" -f $exePath)
-    $proc = Start-Process -FilePath $exePath -PassThru
+    if (-not [string]::IsNullOrWhiteSpace($LocalAppData)) {
+        $localRoot = [System.IO.Path]::GetFullPath($LocalAppData)
+        if (-not (Test-Path -LiteralPath $localRoot)) { New-Item -ItemType Directory -Path $localRoot | Out-Null }
+        $env:LOCALAPPDATA = $localRoot
+        Write-Output ("[준비] 자식 LOCALAPPDATA 를 격리 루트로 고정했다: {0}" -f $localRoot)
+    }
+    $launchArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($Database)) {
+        $databasePath = [System.IO.Path]::GetFullPath($Database)
+        $databaseParent = Split-Path -Parent $databasePath
+        if (-not (Test-Path -LiteralPath $databaseParent)) { New-Item -ItemType Directory -Path $databaseParent | Out-Null }
+        $launchArguments = @('--database="' + $databasePath + '"')
+        Write-Output ("[준비] 격리 DB 로 기동한다: {0}" -f $databasePath)
+    }
+    if ($launchArguments.Count -gt 0) {
+        Write-Output ("`$ Start-Process {0} -ArgumentList {1} -PassThru" -f $exePath, ($launchArguments -join ' '))
+        $proc = Start-Process -FilePath $exePath -ArgumentList $launchArguments -PassThru
+    } else {
+        Write-Output ("`$ Start-Process {0} -PassThru" -f $exePath)
+        $proc = Start-Process -FilePath $exePath -PassThru
+    }
     Write-Output ("[관찰] Id={0} HasExited={1}" -f $proc.Id, $proc.HasExited)
 
     $deadline = [DateTime]::UtcNow.AddMilliseconds($WindowWaitMs)
