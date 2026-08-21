@@ -51,6 +51,26 @@ W0 T4 가 시험 이식 대장을 만들 때 그 주석의 pytest node ID 를 �
 `::이름` 표기는 **같은 블록의 앞줄**에 경로가 나와 있어야 한다. 앞이 비어 있으면
 그 표기는 어느 파일의 시험인지 아무도 모르므로 위반이다.
 
+## 대장 시대의 추적 (2026-08-21 개정 — W2 이후 규약 반영)
+
+T4a 가 시험 이식 대장을 동결한 뒤(2026-08-19), W2 이후 이식 시험은 node 주석 대신
+**추적 ID 를 시험 이름·태그에 실었다**. 대장 문서가 node↔native_id 매핑을 소유하므로
+시험마다 주석을 반복하지 않는다. 이 게이트는 그 관례를 그대로 굳힌다 — `TEST_CASE`
+는 다음 셋 중 하나면 추적된 것이다.
+
+1. 바로 위 `대응 원본` 주석 블록(W1 규약 — claim 해소 강제는 그대로다)
+2. 시험 이름이 추적 ID 로 시작: 대장 native_id(`WTL-W#-####`·`PLAN-W#-####`),
+   T4a uncertain(`T4A-UNC-###`), capability(`CAP-XX-###`·`WTL-CAP-XX-###`),
+   동결 조각 계약 SC(`W#-D8-###` 류·`W#-Z#` 류)
+3. 태그 문자열에 동결 조각 계약 태그(`[W#-...]`)가 있음 — 조각 계약 testplan 이
+   케이스 이름을 verbatim 으로 고정한 경우(예: multi-window 9건)의 진입로다
+
+이름·태그는 **형식**만 본다. ID 가 대장·추적표·계약에 실재하는지는 각각
+`check_test_port_register.py`·`check_capability_matrix.py`·조각 게이트 소관이다 —
+docs/ 는 gitignored 라 이 게이트의 기본 실행이 저장소 밖 파일에 의존하면 안 된다.
+예외로 `--register <대장 경로>` 를 주면 대장 계열 제목 ID(`WTL-`/`PLAN-`)의 실재를
+그 파일에서 추가 대조한다(선택 — 대장이 있는 머신에서만).
+
 ## 무엇을 증명하지 않나 (여기 적힌 것은 이 게이트가 못 보는 것이다)
 
 * **시험이 같은 동작을 보는지.** 이것이 가장 큰 구멍이다. 이 게이트는 주석이 가리키는
@@ -118,6 +138,26 @@ TEST_MACRO = re.compile(r"\bTEST_CASE\s*\(")
 RAW_PREFIX = re.compile(r"(?:u8|u|U|L)?R$")
 CHAR_PREFIX = re.compile(r"(?:u8|u|U|L)$")
 
+# 대장 시대 추적 ID 문법(모듈 머리 주석 참조). 열거가 정본이다 — 느슨한 대문자
+# 접두 일반화는 장식 ID 를 추적으로 승격시킨다.
+TRACKED_TITLE = re.compile(
+    r"^(?:"
+    r"WTL-W[0-9]-\d{4}"  # 시험 이식 대장 native_id (구현분)
+    r"|PLAN-W[0-9]-\d{4}"  # 시험 이식 대장 planned id
+    r"|T4A-UNC-\d{3}"  # T4a uncertain 행
+    r"|(?:WTL-)?CAP-[A-Z]{2}-\d{3}"  # capability 추적표 행
+    r"|W[0-9]-[A-Z][A-Za-z0-9]*-\d{3}"  # 동결 조각 계약 SC (예: W3-D8-001)
+    r"|W[0-9]-Z\d+"  # W2 Z-계열 조각 계약
+    r")(?:\s|$)"
+)
+# 대장 계열만 `--register` 실재 대조 대상이다.
+REGISTER_TITLE = re.compile(r"^(?:WTL|PLAN)-W[0-9]-\d{4}")
+# 동결 조각 계약 태그. 태그 문자열 리터럴 안에서 찾는다.
+SLICE_TAG = re.compile(r"\[W[0-9]-[A-Za-z0-9-]+\]")
+# 인자 목록 수집의 안전 상한. TEST_CASE 인자 목록이 이 길이를 넘으면 형식이 깨진
+# 파일이므로 수집을 접는다(빈 목록 = 미추적 판정 = 안전한 쪽).
+_ARG_SCAN_CAP = 4096
+
 
 class GateEnvironmentError(RuntimeError):
     """판정을 시작할 수 없는 상태. 위반이 아니라 종료 코드 2 다."""
@@ -136,6 +176,8 @@ class Scan:
 
     test_lines: list[int] = field(default_factory=list)
     comment_lines: dict[int, str] = field(default_factory=dict)
+    # TEST_CASE 줄 -> 인자 목록의 문자열 리터럴 내용(제목이 첫 항).
+    test_args: dict[int, list[str]] = field(default_factory=dict)
     unterminated: str | None = None
 
 
@@ -233,12 +275,72 @@ def scan_source(source: str) -> Scan:
             matched = TEST_MACRO.match(source, index)
             if matched is not None:
                 scan.test_lines.append(line)
+                scan.test_args.setdefault(line, []).extend(
+                    _collect_call_literals(source, matched.end())
+                )
                 index = matched.end()
                 continue
 
         index += 1
 
     return scan
+
+
+def _collect_call_literals(source: str, start: int) -> list[str]:
+    """`TEST_CASE(` 직후 위치에서 인자 목록의 문자열 리터럴 내용을 순서대로 모은다.
+
+    괄호 깊이가 0 으로 돌아오면 끝이다. 리터럴 안의 괄호·따옴표는 `_skip_quoted` 로
+    건너뛰므로 세지 않는다. `{`·`;` 를 만나거나 상한을 넘으면 형식이 깨진 것이므로
+    그때까지 모은 것을 버리고 빈 목록을 돌려준다 — 미추적 판정이 안전한 쪽이다.
+    """
+    literals: list[str] = []
+    depth = 1
+    index = start
+    limit = min(len(source), start + _ARG_SCAN_CAP)
+    while index < limit:
+        char = source[index]
+        if char == '"':
+            end = _skip_quoted(source, index, '"')
+            if end is None:
+                return []
+            literals.append(source[index + 1 : end - 1])
+            index = end
+            continue
+        if char == "'":
+            end = _skip_quoted(source, index, "'")
+            if end is None:
+                return []
+            index = end
+            continue
+        if char == "/" and index + 1 < limit and source[index + 1] == "/":
+            newline = source.find("\n", index)
+            index = len(source) if newline == -1 else newline
+            continue
+        if char == "/" and index + 1 < limit and source[index + 1] == "*":
+            end = source.find("*/", index + 2)
+            if end == -1:
+                return []
+            index = end + 2
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return literals
+        elif char in "{;":
+            return []
+        index += 1
+    return []
+
+
+def is_tracked(literals: Sequence[str]) -> bool:
+    """대장 시대 추적 판정 — 제목 ID 또는 조각 계약 태그(모듈 머리 주석 참조)."""
+    if not literals:
+        return False
+    if TRACKED_TITLE.match(literals[0]) is not None:
+        return True
+    return any(SLICE_TAG.search(text) is not None for text in literals[1:])
 
 
 def _skip_quoted(source: str, start: int, quote: str) -> int | None:
@@ -382,15 +484,22 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def check_source(source: str, label: str, resolver: Resolver) -> tuple[list[str], int, int]:
-    """(위반 목록, 검사한 `TEST_CASE` 수, 해소한 node ID 수).
+def check_source(
+    source: str,
+    label: str,
+    resolver: Resolver,
+    register_text: str | None = None,
+) -> tuple[list[str], int, int, int]:
+    """(위반 목록, 검사한 `TEST_CASE` 수, 해소한 node ID 수, ID·태그 추적 수).
 
     node ID 수를 따로 세는 것은 "주장한 것은 전부 실재한다" 가 주장이 0 건이어도
     참이기 때문이다. 전건이 역보강 대기 선언이면 이 게이트는 실재성을 하나도
-    증명하지 않은 것이고, 그 사실이 보고에 드러나야 한다.
+    증명하지 않은 것이고, 그 사실이 보고에 드러나야 한다. ID·태그 추적 수도 같은
+    이유로 센다 — 주석 추적과 ID 추적의 비율이 보고에 드러나야 한다.
     """
     problems: list[str] = []
     resolved = 0
+    tracked = 0
     scan = scan_source(normalise(source))
     if scan.unterminated is not None:
         problems.append(
@@ -398,12 +507,28 @@ def check_source(source: str, label: str, resolver: Resolver) -> tuple[list[str]
         )
 
     for test_line in scan.test_lines:
+        literals = scan.test_args.get(test_line, [])
+        id_tracked = is_tracked(literals)
+        if id_tracked and register_text is not None and literals:
+            matched = REGISTER_TITLE.match(literals[0])
+            if matched is not None and matched.group(0) not in register_text:
+                problems.append(
+                    f"{label}:{test_line} 제목 ID {matched.group(0)} 가 대장에 없다"
+                )
+                continue
         block = comment_block(scan, test_line)
         if not block:
+            if id_tracked:
+                tracked += 1
+                continue
             problems.append(f"{label}:{test_line} TEST_CASE 바로 위에 추적 주석이 없다")
             continue
         parsed = read_block(block)
         if not parsed.has_origin:
+            if id_tracked:
+                # 추적 ID 가 있고 위 주석이 추적 주석이 아니면(설명 주석 등) ID 추적이다.
+                tracked += 1
+                continue
             problems.append(
                 f"{label}:{test_line} 주석 블록에 `대응 원본` 표기가 없다"
                 f"(블록 {block[0][0]}~{block[-1][0]} 줄)"
@@ -425,7 +550,7 @@ def check_source(source: str, label: str, resolver: Resolver) -> tuple[list[str]
                 f"{label}:{test_line} `대응 원본` 은 있으나 node ID 도, 역보강 대기 선언도, "
                 f"부재 선언도 없다(블록 {block[0][0]}~{block[-1][0]} 줄)"
             )
-    return problems, len(scan.test_lines), resolved
+    return problems, len(scan.test_lines), resolved, tracked
 
 
 def source_files(root: Path) -> list[Path]:
@@ -436,22 +561,28 @@ def source_files(root: Path) -> list[Path]:
     )
 
 
-def run_root(root: Path, resolver: Resolver) -> tuple[list[str], int, int, int]:
-    """(위반 목록, 검사한 `TEST_CASE` 수, 해소한 node ID 수, 읽은 파일 수)."""
+def run_root(
+    root: Path, resolver: Resolver, register_text: str | None = None
+) -> tuple[list[str], int, int, int, int]:
+    """(위반 목록, 검사한 `TEST_CASE` 수, 해소한 node ID 수, ID·태그 추적 수, 읽은 파일 수)."""
     problems: list[str] = []
     total = 0
     resolved = 0
+    tracked = 0
     files = source_files(root)
     for path in files:
         try:
             source = path.read_text(encoding="utf-8-sig")
         except OSError as error:
             raise GateEnvironmentError(f"읽지 못했다 - {error}") from error
-        found, count, hits = check_source(source, display_path(path), resolver)
+        found, count, hits, ids = check_source(
+            source, display_path(path), resolver, register_text
+        )
         problems.extend(found)
         total += count
         resolved += hits
-    return problems, total, resolved, len(files)
+        tracked += ids
+    return problems, total, resolved, tracked, len(files)
 
 
 # ---------------------------------------------------------------------------------------
@@ -461,11 +592,14 @@ def run_self_test() -> int:
     """통과해야 할 것이 통과하고 잡아야 할 것이 잡히는지 본다."""
     required = [
         "good.cpp",
+        "good_tracked.cpp",
         "bad_no_comment.cpp",
         "bad_missing_function.cpp",
         "bad_missing_file.cpp",
         "bad_no_claim.cpp",
         "bad_unanchored_ref.cpp",
+        "bad_tracked_lookalike.cpp",
+        "register_sample.md",
         "tests/integration/test_sample.py",
     ]
     absent = [name for name in required if not (FIXTURE_DIR / name).is_file()]
@@ -478,7 +612,7 @@ def run_self_test() -> int:
 
     # 정상 표본. 트리에 실재하는 일곱 가지 주석 배치를 한 파일에 모아 둔 것이다.
     good = (FIXTURE_DIR / "good.cpp").read_text(encoding="utf-8-sig")
-    accepted, counted, resolved = check_source(good, "good.cpp", resolver)
+    accepted, counted, resolved, _tracked = check_source(good, "good.cpp", resolver)
     if accepted:
         print(f"  FAIL  정상 표본이 거절됐다: {accepted}")
         failures += 1
@@ -493,6 +627,36 @@ def run_self_test() -> int:
     else:
         print(f"  PASS  정상 표본 수용(TEST_CASE {counted} 건, node ID {resolved} 건 해소)")
 
+    # ID·태그 추적 표본. 대장 시대의 여섯 가지 추적 표기를 한 파일에 모아 둔 것이다.
+    # 개수까지 본다 - 인자 수집 결함은 "위반 0건" 으로는 드러나지 않는다.
+    tracked_source = (FIXTURE_DIR / "good_tracked.cpp").read_text(encoding="utf-8-sig")
+    t_problems, t_counted, t_resolved, t_tracked = check_source(
+        tracked_source, "good_tracked.cpp", resolver
+    )
+    if t_problems:
+        print(f"  FAIL  ID·태그 추적 표본이 거절됐다: {t_problems}")
+        failures += 1
+    elif t_counted != 7 or t_resolved != 0 or t_tracked != 7:
+        print(
+            f"  FAIL  ID·태그 추적 표본에서 TEST_CASE 7 / node 0 / 추적 7 이 아니라 "
+            f"{t_counted} / {t_resolved} / {t_tracked} 를 셌다"
+        )
+        failures += 1
+    else:
+        print(f"  PASS  ID·태그 추적 표본 수용(TEST_CASE {t_counted} 건 전건 ID·태그 추적)")
+
+    # 대장 대조. 표본의 대장 계열 ID 중 대장에 있는 것은 통과, 없는 것은 걸려야 한다.
+    register_text = (FIXTURE_DIR / "register_sample.md").read_text(encoding="utf-8-sig")
+    r_problems, _rc, _rr, _rt = check_source(
+        tracked_source, "good_tracked.cpp", resolver, register_text
+    )
+    register_hits = [line for line in r_problems if "대장에 없다" in line]
+    if len(register_hits) == 1 and "WTL-W2-9999" in register_hits[0] and len(r_problems) == 1:
+        print(f"  PASS  대장 대조: 실재 ID 수용, 부재 ID 거부 ({register_hits[0]})")
+    else:
+        print(f"  FAIL  대장 대조가 기대와 다르다: {r_problems}")
+        failures += 1
+
     # 기대 사유까지 맞춘다. "무엇이든 걸렸다" 로는 엉뚱한 이유로 통과한 자기시험을
     # 가려낼 수 없다 - 결함 표본은 심은 결함 때문에 거부돼야 한다.
     cases = [
@@ -501,10 +665,11 @@ def run_self_test() -> int:
         ("파일 자체가 없는 node ID", "bad_missing_file.cpp", "가리키는 파일이 없다"),
         ("아무것도 주장하지 않는 주석", "bad_no_claim.cpp", "부재 선언도 없다"),
         ("경로 없는 `::이름` 표기", "bad_unanchored_ref.cpp", "어느 파일의 시험인지"),
+        ("추적 ID 처럼 보이는 표기", "bad_tracked_lookalike.cpp", "추적 주석이 없다"),
     ]
     for name, fixture, expected in cases:
         source = (FIXTURE_DIR / fixture).read_text(encoding="utf-8-sig")
-        found, _count, _resolved = check_source(source, fixture, resolver)
+        found, _count, _resolved, _tracked = check_source(source, fixture, resolver)
         hit = [line for line in found if expected in line]
         if hit:
             print(f"  PASS  결함 표본 거부: {name} ({hit[0]})")
@@ -525,7 +690,8 @@ def run_self_test() -> int:
             failures += 1
 
     print(
-        "자기시험 PASS: 정상 1건 수용, 결함 5종 전건 거부, 실제 트리 추출 확인"
+        "자기시험 PASS: 정상 2건(주석·ID 추적) 수용, 대장 대조 양방향, 결함 6종 전건 거부, "
+        "실제 트리 추출 확인"
         if failures == 0
         else f"자기시험 실패 {failures} 건"
     )
@@ -553,6 +719,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=REPO_ROOT,
         help="node ID 를 해소할 기준 디렉터리(기본: 저장소 루트)",
     )
+    parser.add_argument(
+        "--register",
+        type=Path,
+        default=None,
+        help="시험 이식 대장 문서 경로(선택) - 대장 계열 제목 ID 의 실재를 추가 대조한다",
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
@@ -564,9 +736,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.resolve_root.is_dir():
         print(f"오류: 디렉터리가 없다 - {args.resolve_root}", file=sys.stderr)
         return 2
+    register_text: str | None = None
+    if args.register is not None:
+        try:
+            register_text = args.register.read_text(encoding="utf-8-sig")
+        except OSError as error:
+            print(f"오류: 대장을 읽지 못했다 - {error}", file=sys.stderr)
+            return 2
 
     try:
-        problems, total, resolved, files = run_root(args.root, Resolver(args.resolve_root))
+        problems, total, resolved, tracked, files = run_root(
+            args.root, Resolver(args.resolve_root), register_text
+        )
     except GateEnvironmentError as error:
         print(f"오류: {error}", file=sys.stderr)
         return 2
@@ -591,8 +772,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     print(
-        f"통과: TEST_CASE {total} 건 전건이 추적 주석을 달고 있고, "
-        f"주장한 node ID {resolved} 건은 전부 실재한다"
+        f"통과: TEST_CASE {total} 건 전건이 추적된다"
+        f"(주석 추적에서 해소한 node ID {resolved} 건 전부 실재, ID·태그 추적 {tracked} 건"
+        f"{', 대장 대조 포함' if register_text is not None else ''})"
     )
     return 0
 

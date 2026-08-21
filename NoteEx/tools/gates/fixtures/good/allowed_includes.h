@@ -8,6 +8,7 @@
 	#include <memory>
 #include "pynote/core/note.h"
 #include "../core/card_id.h"
+#include "pynote/core/application/window_lifecycle.h"
 
 namespace pynote::core {
 

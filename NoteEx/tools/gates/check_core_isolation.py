@@ -65,7 +65,11 @@ FORBIDDEN_PATTERNS: tuple[str, ...] = (
 
 # 허용 목록은 금지 패턴보다 **먼저** 판정한다 — 넓은 접두 계열이 정당한 헤더를
 # 잡을 때의 유일한 탈출구다. SQLite 는 이식 가능한 저장 엔진이라 core 에서 쓴다.
-ALLOWED_HEADERS: frozenset[str] = frozenset({"sqlite3.h", "sqlite3ext.h"})
+# window_lifecycle.h 는 core 자신의 헤더인데 `win*.h` 글롭에 걸리는 이름 충돌이라
+# 허용한다 — Win32 SDK 에 같은 이름의 헤더는 없다.
+ALLOWED_HEADERS: frozenset[str] = frozenset(
+    {"sqlite3.h", "sqlite3ext.h", "window_lifecycle.h"}
+)
 
 _FORBIDDEN_RE: tuple[re.Pattern[str], ...] = tuple(
     re.compile(fnmatch.translate(pattern), re.IGNORECASE)
