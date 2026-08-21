@@ -34,6 +34,11 @@ namespace pynote::platform
 		bool GetInteger(const std::string& _sKey, std::int64_t* _pnValue) const;
 		bool GetDouble(const std::string& _sKey, double* _pdValue) const;
 		bool GetBytes(const std::string& _sKey, std::vector<std::uint8_t>* _pValue) const;
+		bool SetBytes(const std::string& _sKey, std::vector<std::uint8_t> _Value);
+		bool Remove(const std::string& _sKey);
+		bool MigrateBytes(
+			const std::string& _sLegacyKey, const std::string& _sTargetKey,
+			bool* _pbMigrated = nullptr);
 
 		int  GetInt(const std::string& _sKey, int _nDefault) const;
 		void SetInt(const std::string& _sKey, int _nValue);

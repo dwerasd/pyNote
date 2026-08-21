@@ -71,6 +71,9 @@
     <ClInclude Include="include\pynote\core\application\first_input_capture.h">
       <Filter>응용</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\application\window_lifecycle.h">
+      <Filter>응용</Filter>
+    </ClInclude>
     <ClInclude Include="include\pynote\core\application\workspace_state.h">
       <Filter>응용</Filter>
     </ClInclude>
@@ -194,6 +197,9 @@
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\first_input_capture.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\window_lifecycle.cpp">
       <Filter>응용</Filter>
     </ClCompile>
     <ClCompile Include="src\application\workspace_state.cpp">

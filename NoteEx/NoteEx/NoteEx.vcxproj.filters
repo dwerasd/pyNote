@@ -27,6 +27,21 @@
     <ClInclude Include="CMain.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="CApplication.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+	<ClInclude Include="CDocumentListShell.h">
+	  <Filter>헤더 파일</Filter>
+	</ClInclude>
+	<ClInclude Include="CDocumentPage.h">
+	  <Filter>헤더 파일</Filter>
+	</ClInclude>
+	<ClInclude Include="CSearchDialog.h">
+	  <Filter>헤더 파일</Filter>
+	</ClInclude>
+	<ClInclude Include="CWindowLayout.h">
+	  <Filter>헤더 파일</Filter>
+	</ClInclude>
     <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
@@ -38,12 +53,27 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CApplication.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+	<ClCompile Include="CDocumentListShell.cpp">
+	  <Filter>소스 파일</Filter>
+	</ClCompile>
+	<ClCompile Include="CDocumentPage.cpp">
+	  <Filter>소스 파일</Filter>
+	</ClCompile>
+	<ClCompile Include="CSearchDialog.cpp">
+	  <Filter>소스 파일</Filter>
+	</ClCompile>
     <ClCompile Include="CMain.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="WinMain.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+	<ClCompile Include="CWindowLayout.cpp">
+	  <Filter>소스 파일</Filter>
+	</ClCompile>
     <ClCompile Include="..\platform\src\win32_device_settings.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
@@ -67,4 +97,9 @@
       <Filter>리소스 파일</Filter>
     </Image>
   </ItemGroup>
+	<ItemGroup>
+	  <None Include="NoteEx.manifest">
+		<Filter>리소스 파일</Filter>
+	  </None>
+	</ItemGroup>
 </Project>

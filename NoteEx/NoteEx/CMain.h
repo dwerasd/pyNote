@@ -1,5 +1,4 @@
-﻿#pragma once
-
+#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -10,7 +9,6 @@
 #include <atluser.h>
 #include <atldlgs.h>
 
-// D2D 렌더 백엔드(자가 라이브러리). 카드 목록/본문 페인팅의 페인트 백엔드다.
 #include <D2DWrapp/D2DDevice.h>
 #include <D2DWrapp/D2DSwapTarget.h>
 #include <D2DWrapp/D2DBrushCache.h>
@@ -18,73 +16,143 @@
 #pragma comment(lib, "D2DWrapp")
 
 #include "Resource.h"
+#include "CDocumentListShell.h"
+#include "CDocumentPage.h"
+#include "CWindowLayout.h"
+#include "pynote/core/application/window_lifecycle.h"
 
+#include <optional>
+#include <string>
+#include <vector>
 
-namespace pynote::platform
+class CApplication;
+class C_MAIN;
+
+class C_MAIN_PANE_HOST final : public CWindowImpl<C_MAIN_PANE_HOST>
 {
-	class C_WIN32_DEVICE_SETTINGS;
-}
+public:
+	DECLARE_WND_CLASS_EX(L"NoteExPaneHost", CS_HREDRAW | CS_VREDRAW, COLOR_WINDOW)
 
+	void Initialize(C_MAIN* _pOwner, bool _bEditor) noexcept
+	{
+		m_pOwner = _pOwner;
+		m_bEditor = _bEditor;
+	}
 
-// 메인 프레임 창. DBGView 의 C_MAIN 스타일(C_SINGLETON + WTL CAppModule/CMessageLoop +
-// Init/Display/Destroy)을 그대로 따르는 초기 골격이다.
-// 본문은 D2D 로 그린다 - 카드 목록/에디터는 이 렌더 경로 위에 올린다.
-class C_MAIN
-	: public dk::C_SINGLETON<C_MAIN>
-	, public CFrameWindowImpl<C_MAIN>
+	BEGIN_MSG_MAP(C_MAIN_PANE_HOST)
+		MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
+		MESSAGE_HANDLER(WM_PAINT, OnPaint)
+	END_MSG_MAP()
+
+	LRESULT OnEraseBkgnd(UINT, WPARAM, LPARAM, BOOL&) { return(1); }
+	LRESULT OnPaint(UINT, WPARAM, LPARAM, BOOL&);
+
+private:
+	C_MAIN* m_pOwner{ nullptr };
+	bool m_bEditor{ false };
+};
+
+// 한 인스턴스는 한 HWND와 한 document/workspace identity만 소유한다. 프로세스 자원과
+// 생명주기 판정은 CApplication이 소유하고 native callback은 stable token만 전달한다.
+class C_MAIN : public CFrameWindowImpl<C_MAIN>
 {
 private:
-	static constexpr UINT WM_NOTEEX_NEW_WINDOW = WM_APP + 1;
+	HINSTANCE m_hInst{ nullptr };
+	CApplication* m_pApplication{ nullptr };
+	pynote::core::application::WINDOW_TOKEN m_Token{ 0 };
+	std::string m_sWorkspaceId;
+	std::optional<std::string> m_sDocumentId{};
+	std::wstring m_sTitle;
+	d2d::C_D2D_SWAP_TARGET m_mainTarget;
+	pynote::shell::C_WINDOW_SPLITTER m_Splitter;
+	C_MAIN_PANE_HOST m_LeftPane;
+	C_MAIN_PANE_HOST m_EditorPane;
+	C_DOCUMENT_PAGE m_DocumentPage;
+	C_DOCUMENT_LIST_SHELL m_DocumentListShell;
+	HWND m_hStatus{ nullptr };
+	HMENU m_hRuntimeMenu{ nullptr };
+	bool m_bFocusMode{ false };
+	bool m_bD2DReady{ false };
+	bool m_bCleaned{ false };
 
-	HINSTANCE		m_hInst{ nullptr };
-
-	CAppModule		m_Module;
-	CMessageLoop	m_MsgLoop;
-	pynote::platform::C_WIN32_DEVICE_SETTINGS* m_pSettings{ nullptr };
-
-	// D2D 자원. 디바이스/브러시/텍스트는 창 간 공유 대상이고, 스왑타겟은 창별로 하나다.
-	d2d::C_D2D_DEVICE		m_d2dDevice;
-	d2d::C_D2D_BRUSH_CACHE	m_brushCache;
-	d2d::C_D2D_TEXT			m_textEngine;
-	d2d::C_D2D_SWAP_TARGET	m_mainTarget;
-	bool					m_bD2DReady{ false };
-
-	void save_rect();	// 창 위치/크기 INI 영속(최소화 상태 제외)
-	void move_rect();	// INI 위치/크기 복원(값이 없으면 화면 중앙)
-	void render_();		// D2D 프레임 1회(BeginDraw - 본문 - EndDraw, 디바이스 로스트 복구 포함)
+	bool save_geometry();
+	bool restore_geometry(bool _bAllowLegacyFallback, bool* _pbMaximized);
+	void layout_children();
+	void render_();
+	friend class C_MAIN_PANE_HOST;
 
 public:
 	DECLARE_FRAME_WND_CLASS(L"NoteExMainWindow", IDC_NOTEEX)
 
-	C_MAIN();
-	~C_MAIN();
+	C_MAIN() = default;
+	~C_MAIN() = default;
 
-	bool Init(HINSTANCE _hInstance, pynote::platform::C_WIN32_DEVICE_SETTINGS* _pSettings);
-	int  Display();
-	void Destroy();
-	void RequestNewWindow();
+	bool Init(
+		HINSTANCE _hInstance, CApplication* _pApplication,
+		pynote::core::application::WINDOW_TOKEN _Token,
+		std::string _sWorkspaceId, std::optional<std::string> _sDocumentId,
+		std::wstring _sTitle, bool _bAllowLegacyGeometryFallback);
+	bool Protect();
+	pynote::core::application::E_LEAVE_RESULT RequestLeave();
+	bool PersistState();
+	bool Cleanup();
+	void DestroyNative();
+	bool PreTranslateMessage(MSG* _pMessage);
+	static std::vector<ACCEL> RuntimeAccelerators();
+
+	C_DOCUMENT_PAGE& DocumentPage() noexcept { return(m_DocumentPage); }
+	const C_DOCUMENT_PAGE& DocumentPage() const noexcept { return(m_DocumentPage); }
+	HWND StatusHwnd() const noexcept { return(m_hStatus); }
+	HMENU RuntimeMenu() const noexcept { return(m_hRuntimeMenu); }
+	bool FocusMode() const noexcept { return(m_bFocusMode); }
+	C_DOCUMENT_LIST_SHELL& DocumentListShell() noexcept { return(m_DocumentListShell); }
 
 	BEGIN_MSG_MAP(C_MAIN)
 		MESSAGE_HANDLER(WM_CREATE, OnCreate)
 		MESSAGE_HANDLER(WM_CLOSE, OnClose)
 		MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
+		MESSAGE_HANDLER(WM_NCDESTROY, OnNcDestroy)
+		MESSAGE_HANDLER(WM_ACTIVATE, OnActivate)
 		MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
 		MESSAGE_HANDLER(WM_SIZE, OnSize)
+		MESSAGE_HANDLER(WM_DPICHANGED, OnDpiChanged)
 		MESSAGE_HANDLER(WM_PAINT, OnPaint)
-		MESSAGE_HANDLER(WM_NOTEEX_NEW_WINDOW, OnNewWindow)
+		COMMAND_ID_HANDLER(IDM_RESET_GEOMETRY, OnResetGeometry)
+		COMMAND_ID_HANDLER(IDM_NEW_WINDOW, OnNewWindow)
+		COMMAND_ID_HANDLER(IDM_DOCUMENT_LIST, OnDocumentList)
+		COMMAND_ID_HANDLER(IDM_GLOBAL_SEARCH, OnGlobalSearch)
+		COMMAND_ID_HANDLER(IDM_SAVE_CARD, OnSaveCard)
+		COMMAND_ID_HANDLER(IDM_FIND, OnFind)
+		COMMAND_ID_HANDLER(IDM_REPLACE, OnReplace)
+		COMMAND_ID_HANDLER(IDM_CARD_LIST, OnCardList)
+		COMMAND_ID_HANDLER(IDM_HISTORY, OnHistory)
+		COMMAND_ID_HANDLER(IDM_BACK, OnBack)
+		COMMAND_ID_HANDLER(IDM_FOCUS_MODE, OnFocusMode)
 		COMMAND_ID_HANDLER(IDM_EXIT, OnMenuExit)
 		COMMAND_ID_HANDLER(IDM_ABOUT, OnMenuAbout)
 		CHAIN_MSG_MAP(CFrameWindowImpl<C_MAIN>)
 	END_MSG_MAP()
 
-	LRESULT OnCreate(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
-	LRESULT OnClose(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
-	LRESULT OnDestroy(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
-	// 배경 지우기 차단 - D2D 가 본문 전체를 매 프레임 덮으므로 GDI 지우기는 깜박임만 만든다.
-	LRESULT OnEraseBkgnd(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& /*_bHandled*/) { return(1); }
-	LRESULT OnSize(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
-	LRESULT OnPaint(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& /*_bHandled*/);
-	LRESULT OnNewWindow(UINT /*_uMsg*/, WPARAM /*_wParam*/, LPARAM /*_lParam*/, BOOL& _bHandled);
-	LRESULT OnMenuExit(WORD /*_wNotifyCode*/, WORD /*_wID*/, HWND /*_hWndCtl*/, BOOL& /*_bHandled*/);
-	LRESULT OnMenuAbout(WORD /*_wNotifyCode*/, WORD /*_wID*/, HWND /*_hWndCtl*/, BOOL& /*_bHandled*/);
+	LRESULT OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled);
+	LRESULT OnClose(UINT, WPARAM, LPARAM, BOOL& _bHandled);
+	LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled);
+	LRESULT OnNcDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled);
+	LRESULT OnActivate(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled);
+	LRESULT OnEraseBkgnd(UINT, WPARAM, LPARAM, BOOL&) { return(1); }
+	LRESULT OnSize(UINT, WPARAM, LPARAM, BOOL& _bHandled);
+	LRESULT OnDpiChanged(UINT, WPARAM _wParam, LPARAM _lParam, BOOL& _bHandled);
+	LRESULT OnPaint(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnResetGeometry(WORD, WORD, HWND, BOOL&);
+	LRESULT OnNewWindow(WORD, WORD, HWND, BOOL&);
+	LRESULT OnDocumentList(WORD, WORD, HWND, BOOL&);
+	LRESULT OnGlobalSearch(WORD, WORD, HWND, BOOL&);
+	LRESULT OnSaveCard(WORD, WORD, HWND, BOOL&);
+	LRESULT OnFind(WORD, WORD, HWND, BOOL&);
+	LRESULT OnReplace(WORD, WORD, HWND, BOOL&);
+	LRESULT OnCardList(WORD, WORD, HWND, BOOL&);
+	LRESULT OnHistory(WORD, WORD, HWND, BOOL&);
+	LRESULT OnBack(WORD, WORD, HWND, BOOL&);
+	LRESULT OnFocusMode(WORD, WORD, HWND, BOOL&);
+	LRESULT OnMenuExit(WORD, WORD, HWND, BOOL&);
+	LRESULT OnMenuAbout(WORD, WORD, HWND, BOOL&);
 };

@@ -852,6 +852,59 @@ namespace pynote::platform
 		return(true);
 	}
 
+	bool C_WIN32_DEVICE_SETTINGS::SetBytes(
+		const std::string& _sKey, std::vector<std::uint8_t> _Value)
+	{
+		if (!is_valid_device_type(_sKey, E_VALUE_TYPE::Bytes))
+		{
+			m_pState->sLastError = "허용되지 않은 bytes key: " + _sKey;
+			return(false);
+		}
+		m_pState->Values[_sKey] = bytes_value(std::move(_Value));
+		return(true);
+	}
+
+	bool C_WIN32_DEVICE_SETTINGS::Remove(const std::string& _sKey)
+	{
+		if (!is_valid_device_type(_sKey, E_VALUE_TYPE::Bytes))
+		{
+			m_pState->sLastError = "허용되지 않은 제거 key: " + _sKey;
+			return(false);
+		}
+		m_pState->Values.erase(_sKey);
+		return(true);
+	}
+
+	bool C_WIN32_DEVICE_SETTINGS::MigrateBytes(
+		const std::string& _sLegacyKey, const std::string& _sTargetKey, bool* _pbMigrated)
+	{
+		if (_pbMigrated) { *_pbMigrated = false; }
+		if (!is_valid_device_type(_sLegacyKey, E_VALUE_TYPE::Bytes) ||
+			!is_valid_device_type(_sTargetKey, E_VALUE_TYPE::Bytes))
+		{
+			m_pState->sLastError = "허용되지 않은 bytes 이관 key";
+			return(false);
+		}
+		const auto Legacy = m_pState->Values.find(_sLegacyKey);
+		if (Legacy == m_pState->Values.end()) { return(true); }
+
+		const VALUE_MAP Previous = m_pState->Values;
+		const bool bTargetExists = m_pState->Values.find(_sTargetKey) != m_pState->Values.end();
+		if (!bTargetExists)
+		{
+			m_pState->Values[_sTargetKey] = Legacy->second;
+			if (_pbMigrated) { *_pbMigrated = true; }
+		}
+		m_pState->Values.erase(_sLegacyKey);
+		if (!this->Sync())
+		{
+			m_pState->Values = Previous;
+			if (_pbMigrated) { *_pbMigrated = false; }
+			return(false);
+		}
+		return(true);
+	}
+
 	int C_WIN32_DEVICE_SETTINGS::GetInt(const std::string& _sKey, int _nDefault) const
 	{
 		std::int64_t nValue = 0;

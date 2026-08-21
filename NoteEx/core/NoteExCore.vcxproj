@@ -71,6 +71,7 @@
     <ClInclude Include="include\pynote\core\application\drop_import_plan.h" />
     <ClInclude Include="include\pynote\core\application\drop_import_completion.h" />
     <ClInclude Include="include\pynote\core\application\first_input_capture.h" />
+    <ClInclude Include="include\pynote\core\application\window_lifecycle.h" />
     <ClInclude Include="include\pynote\core\application\workspace_state.h" />
     <ClInclude Include="include\pynote\core\application\search_result_plan.h" />
     <ClInclude Include="include\pynote\core\application\draft_coordinator.h" />
@@ -124,6 +125,7 @@
     <ClCompile Include="src\application\drop_import_plan.cpp" />
     <ClCompile Include="src\application\drop_import_completion.cpp" />
     <ClCompile Include="src\application\first_input_capture.cpp" />
+    <ClCompile Include="src\application\window_lifecycle.cpp" />
     <ClCompile Include="src\application\workspace_state.cpp" />
     <ClCompile Include="src\application\search_result_plan.cpp" />
     <ClCompile Include="src\application\draft_coordinator.cpp" />

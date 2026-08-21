@@ -110,6 +110,17 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseMD|x64'" Label="Vcpkg">
     <VcpkgUseStatic>false</VcpkgUseStatic>
   </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>NoteExCore.lib;sqlite3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+	<Manifest>
+	  <AdditionalManifestFiles>$(ProjectDir)NoteEx.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+	</Manifest>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -242,7 +253,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
+    <ClInclude Include="CApplication.h" />
+    <ClInclude Include="CDocumentListShell.h" />
+    <ClInclude Include="CDocumentPage.h" />
     <ClInclude Include="CMain.h" />
+	<ClInclude Include="CSearchDialog.h" />
+	<ClInclude Include="CWindowLayout.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_single_instance.h" />
@@ -250,7 +266,12 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CApplication.cpp" />
+    <ClCompile Include="CDocumentListShell.cpp" />
+    <ClCompile Include="CDocumentPage.cpp" />
     <ClCompile Include="CMain.cpp" />
+	<ClCompile Include="CSearchDialog.cpp" />
+	<ClCompile Include="CWindowLayout.cpp" />
     <ClCompile Include="WinMain.cpp" />
     <ClCompile Include="..\platform\src\win32_device_settings.cpp" />
     <ClCompile Include="..\platform\src\win32_file_system.cpp" />
@@ -263,6 +284,9 @@
     <Image Include="NoteEx.ico" />
     <Image Include="small.ico" />
   </ItemGroup>
+	<ItemGroup>
+	  <None Include="NoteEx.manifest" />
+	</ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
