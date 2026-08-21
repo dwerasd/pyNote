@@ -392,9 +392,24 @@ struct CApplication::S_STATE : CMessageFilter
 		return(false);
 	}
 
+	// 원본 _protect_windows_quietly(app.py:652) - 앱 주도 창 전환(새 창 create_window:560, 소유 창 활성화
+	// :578/594/621) 전에 생존 창 전부의 최신 초안 보호를 비차단으로 시도한다. 실패는 기록만 하고
+	// 전환을 막지 않는다(CAP-FI-016 "살아 있는 초안을 보호한 뒤 창을 하나 더 만든다").
+	void protect_windows_quietly()
+	{
+		for (const auto& Entry : Windows)
+		{
+			if (Entry.second && !Entry.second->Protect())
+			{
+				DBGPRINT(L"앱 주도 전환 전 창의 recovery draft 보호에 실패했습니다");
+			}
+		}
+	}
+
 	bool create_new_window()
 	{
 		if (!bAcceptNewWindows.load() || !Lifecycle.AcceptsNewWindows()) { return(false); }
+		this->protect_windows_quietly();
 		std::vector<pynote::core::domain::S_DOCUMENT> Documents;
 		std::set<std::string> Eligible;
 		if (!this->list_eligible_documents(&Documents, &Eligible)) { return(false); }
@@ -530,6 +545,7 @@ struct CApplication::S_STATE : CMessageFilter
 	{
 		const auto it = Windows.find(_Token);
 		if (it == Windows.end() || !it->second || !::IsWindow(it->second->m_hWnd)) { return(false); }
+		this->protect_windows_quietly();
 		const HWND hWindow = it->second->m_hWnd;
 		if (::IsIconic(hWindow)) { ::ShowWindow(hWindow, SW_RESTORE); }
 		else { ::ShowWindow(hWindow, SW_SHOW); }
