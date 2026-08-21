@@ -14,6 +14,20 @@ namespace
 	constexpr UINT LEFT_PANE_ID = 2001;
 	constexpr UINT EDITOR_PANE_ID = 2002;
 
+	std::wstring wide(const std::string& _sValue)
+	{
+		if (_sValue.empty()) { return(std::wstring{}); }
+		const int nSize = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+			_sValue.data(), static_cast<int>(_sValue.size()), nullptr, 0);
+		if (nSize <= 0) { return(std::wstring{}); }
+		std::wstring Result(static_cast<std::size_t>(nSize), L'\0');
+		if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, _sValue.data(),
+			static_cast<int>(_sValue.size()), Result.data(), nSize) != nSize)
+		{
+			return(std::wstring{});
+		}
+		return(Result);
+	}
 }
 
 std::vector<ACCEL> C_MAIN::RuntimeAccelerators()
@@ -154,6 +168,143 @@ void C_MAIN::render_()
 	}
 }
 
+void C_MAIN::subscribe_change_bus_()
+{
+	if (!m_pApplication || m_ChangeSubscription != 0) { return; }
+	m_ChangeSubscription = m_pApplication->ChangeBus().Subscribe(
+		[this](const std::string& _sDocumentId) { this->on_document_changed_(_sDocumentId); });
+}
+
+void C_MAIN::unsubscribe_change_bus_()
+{
+	if (!m_pApplication || m_ChangeSubscription == 0) { return; }
+	m_pApplication->ChangeBus().Unsubscribe(m_ChangeSubscription);
+	m_ChangeSubscription = 0;
+}
+
+// 원본 apply_document_change(main_window.py:543~564) + _remove_page_after_change(:584~601).
+void C_MAIN::on_document_changed_(const std::string& _sDocumentId)
+{
+	if (m_bCleaned || !m_pApplication || !m_sDocumentId) { return; }
+	if (*m_sDocumentId != _sDocumentId) { return; }
+	const auto eChange = pynote::shell::ClassifyDocumentChange(
+		m_pApplication->Repositories(), _sDocumentId);
+	if (!eChange)
+	{
+		// 분류가 아니라 관측 실패다 - 살아 있는 페이지를 저장 없이 버리지 않는다.
+		DBGPRINT(L"문서 변경 분류에 실패했습니다");
+		return;
+	}
+	if (*eChange == pynote::shell::E_DOCUMENT_CHANGE::Alive)
+	{
+		this->update_title_();
+		if (!m_bPublishingPageContentChange) { m_DocumentPage.Refresh(); }
+		m_pApplication->PersistWindowState(m_Token, m_sWorkspaceId, m_sDocumentId);
+		this->update_status_();
+		return;
+	}
+	// save_ui_state 는 문서 행이 남아 있을 때만 참이다(RemovedSaveUi).
+	if (*eChange == pynote::shell::E_DOCUMENT_CHANGE::RemovedSaveUi)
+	{
+		if (!m_DocumentPage.PersistState(m_Splitter.SplitSizesDip()))
+		{
+			DBGPRINT(L"소멸 문서의 UI 상태 저장에 실패했습니다");
+		}
+	}
+	m_DocumentPage.Cleanup();
+	this->refill_after_document_removal_();
+}
+
+// 원본 _handle_page_content_changed(main_window.py:1107~1115).
+void C_MAIN::on_page_content_changed_()
+{
+	if (!m_bCleaned && m_pApplication && m_sDocumentId)
+	{
+		// 원본의 try/finally 등가 - 발행이 예외로 탈출해도 가드가 true 로 굳으면
+		// 이 창의 페이지 재채움이 세션 내내 무력화된다.
+		m_bPublishingPageContentChange = true;
+		struct S_GUARD
+		{
+			bool& bFlag;
+			~S_GUARD() { bFlag = false; }
+		} Guard{ m_bPublishingPageContentChange };
+		const bool bPublished = m_pApplication->PublishDocumentChange(*m_sDocumentId);
+		if (!bPublished) { DBGPRINT(L"문서 변경 발행 뒤 소유 매핑 재계산에 실패했습니다"); }
+	}
+	this->update_status_();
+}
+
+void C_MAIN::update_title_()
+{
+	std::optional<std::wstring> sDocumentTitle;
+	if (m_pApplication && m_sDocumentId)
+	{
+		const auto sTitle = m_pApplication->DocumentTitle(*m_sDocumentId);
+		if (sTitle) { sDocumentTitle = wide(*sTitle); }
+	}
+	m_sTitle = pynote::shell::ComposeWindowTitle(sDocumentTitle);
+	if (::IsWindow(this->m_hWnd)) { this->SetWindowText(m_sTitle.c_str()); }
+}
+
+// 원본 _update_status(main_window.py:711~732). 문안 조립은 전부 seam 이 한다.
+void C_MAIN::update_status_()
+{
+	if (!m_pApplication || !m_hStatus || !::IsWindow(m_hStatus)) { return; }
+	std::wstring sText;
+	if (!m_sDocumentId) { sText = pynote::shell::ComposeEmptyStatusText(); }
+	else
+	{
+		const auto Stats = pynote::shell::CountActiveCards(
+			m_pApplication->Repositories(), *m_sDocumentId);
+		if (!Stats)
+		{
+			// 계수 실패를 0 으로 접으면 실패가 정상 상태로 위장된다 - 기존 문안을 둔다.
+			DBGPRINT(L"상태 바 카드 계수에 실패했습니다");
+			return;
+		}
+		sText = pynote::shell::ComposeStatusText(Stats->nCards, Stats->nCodepoints,
+			pynote::shell::ComposeSaveStateText(m_DocumentPage.HasSession(),
+				m_DocumentPage.HasDirtySession(), m_DocumentPage.HasSaveFailed()));
+	}
+	::SendMessageW(m_hStatus, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(sText.c_str()));
+}
+
+// 원본 _refill_after_document_removal(main_window.py:603~) - 시스템 주도 회수로
+// 비워진 창을 즉시 입력 가능한 문서로 다시 채운다.
+// CEILING: registry 항목의 문서 식별자는 재채움 뒤에도 옛 문서를 가리킨다(core 무수정
+// 계약이라 창 재결속 API 가 없다). 소유 판정은 CApplication 이 살아 있는 창의
+// DocumentId() 를 함께 보아 메운다 - 재결속 API 는 W7 에서 core 와 함께 연다.
+bool C_MAIN::refill_after_document_removal_()
+{
+	if (!m_pApplication) { return(false); }
+	const auto sRefillId = m_pApplication->ChooseRefillDocument(m_Token);
+	if (!sRefillId)
+	{
+		m_sDocumentId.reset();
+		this->update_title_();
+		this->update_status_();
+		return(false);
+	}
+	m_sDocumentId = *sRefillId;
+	if (!m_DocumentPage.Init(
+		m_hInst, m_LeftPane, m_EditorPane,
+		m_pApplication->Database(), m_pApplication->Repositories(), m_pApplication->CardService(),
+		m_pApplication->DraftCoordinator(), m_pApplication->SaveCoordinator(),
+		m_sWorkspaceId, *m_sDocumentId))
+	{
+		DBGPRINT(L"재채움 페이지 생성에 실패했습니다");
+		return(false);
+	}
+	m_DocumentPage.SetChangeNotifier([this]() { this->on_page_content_changed_(); });
+	m_pApplication->PersistWindowState(m_Token, m_sWorkspaceId, m_sDocumentId);
+	this->update_title_();
+	this->layout_children();
+	// 발행 트리거 - 창의 문서 재채움이다. 발행을 시작한 창은 재진입 가드 덕에 방금 만든
+	// 페이지를 다시 읽지 않고, 상태 바 갱신은 그 안에서 함께 돈다.
+	this->on_page_content_changed_();
+	return(true);
+}
+
 bool C_MAIN::Init(
 	HINSTANCE _hInstance, CApplication* _pApplication,
 	pynote::core::application::WINDOW_TOKEN _Token,
@@ -204,6 +355,8 @@ bool C_MAIN::PersistState()
 bool C_MAIN::Cleanup()
 {
 	if (m_bCleaned) { return(true); }
+	// 창은 파괴 전에 구독을 해제한다(PLAN-W3-0042).
+	this->unsubscribe_change_bus_();
 	const bool bPage = m_DocumentPage.Cleanup();
 	m_DocumentListShell.Destroy();
 	m_bD2DReady = false;
@@ -281,6 +434,11 @@ LRESULT C_MAIN::OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 		return(-1);
 	}
 	m_DocumentListShell.Show();
+	// 카드 생성·저장 완료가 페이지 통지 콜백을 거쳐 앱 버스 발행으로 간다.
+	m_DocumentPage.SetChangeNotifier([this]() { this->on_page_content_changed_(); });
+	this->subscribe_change_bus_();
+	this->update_title_();
+	this->update_status_();
 	this->layout_children();
 	if (m_mainTarget.Initialize(&m_pApplication->D2DDevice(), m_EditorPane)) { m_bD2DReady = true; }
 	_bHandled = FALSE;
@@ -303,6 +461,10 @@ LRESULT C_MAIN::OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 
 LRESULT C_MAIN::OnNcDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 {
+	// 생성 실패 경로(Init 의 DestroyWindow)는 Cleanup 을 거치지 않는다 - HWND 가 죽는
+	// 모든 경로가 지나는 이 지점에서 해제해야 버스에 죽은 this 캡처가 남지 않는다.
+	// 정상 종료는 Cleanup 이 먼저 해제하므로 토큰 0 재해제는 무해하다(멱등).
+	this->unsubscribe_change_bus_();
 	if (m_pApplication) { m_pApplication->NotifyWindowNcDestroy(m_Token); }
 	_bHandled = FALSE;
 	return(0);

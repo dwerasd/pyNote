@@ -254,6 +254,7 @@
   <ItemGroup>
     <ClInclude Include="framework.h" />
     <ClInclude Include="CApplication.h" />
+    <ClInclude Include="CChangeBus.h" />
     <ClInclude Include="CDocumentListShell.h" />
     <ClInclude Include="CDocumentPage.h" />
     <ClInclude Include="CMain.h" />
@@ -267,6 +268,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CApplication.cpp" />
+    <ClCompile Include="CChangeBus.cpp" />
     <ClCompile Include="CDocumentListShell.cpp" />
     <ClCompile Include="CDocumentPage.cpp" />
     <ClCompile Include="CMain.cpp" />

@@ -49,6 +49,9 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
+	<ClInclude Include="..\NoteEx\CChangeBus.h">
+	  <Filter>하네스</Filter>
+	</ClInclude>
 	<ClInclude Include="..\NoteEx\CWindowLayout.h">
 	  <Filter>하네스</Filter>
 	</ClInclude>
@@ -189,6 +192,9 @@
     <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp">
       <Filter>플랫폼</Filter>
     </ClCompile>
+	<ClCompile Include="..\NoteEx\CChangeBus.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
 	<ClCompile Include="..\NoteEx\CWindowLayout.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
@@ -229,6 +235,9 @@
 	  <Filter>하네스</Filter>
 	</ClCompile>
 	<ClCompile Include="harness\src\w3_shell_consumer_test.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
+	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">

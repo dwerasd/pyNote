@@ -16,6 +16,7 @@
 #pragma comment(lib, "D2DWrapp")
 
 #include "Resource.h"
+#include "CChangeBus.h"
 #include "CDocumentListShell.h"
 #include "CDocumentPage.h"
 #include "CWindowLayout.h"
@@ -71,6 +72,10 @@ private:
 	C_DOCUMENT_LIST_SHELL m_DocumentListShell;
 	HWND m_hStatus{ nullptr };
 	HMENU m_hRuntimeMenu{ nullptr };
+	pynote::shell::SUBSCRIPTION_TOKEN m_ChangeSubscription{ 0 };
+	// 원본 _publishing_page_content_change(main_window.py:1110~1114) 의 재진입 가드다.
+	// 발행을 시작한 창은 자기 페이지를 다시 채우지 않는다 - 제목·상태 바는 무관하게 돈다.
+	bool m_bPublishingPageContentChange{ false };
 	bool m_bFocusMode{ false };
 	bool m_bD2DReady{ false };
 	bool m_bCleaned{ false };
@@ -79,6 +84,13 @@ private:
 	bool restore_geometry(bool _bAllowLegacyFallback, bool* _pbMaximized);
 	void layout_children();
 	void render_();
+	void subscribe_change_bus_();
+	void unsubscribe_change_bus_();
+	void on_document_changed_(const std::string& _sDocumentId);
+	void on_page_content_changed_();
+	void update_title_();
+	void update_status_();
+	bool refill_after_document_removal_();
 	friend class C_MAIN_PANE_HOST;
 
 public:
@@ -103,6 +115,8 @@ public:
 	C_DOCUMENT_PAGE& DocumentPage() noexcept { return(m_DocumentPage); }
 	const C_DOCUMENT_PAGE& DocumentPage() const noexcept { return(m_DocumentPage); }
 	HWND StatusHwnd() const noexcept { return(m_hStatus); }
+	// 소유 문서는 외부 소멸 뒤 재채움으로 바뀐다 - 소유 판정은 이 살아 있는 값을 본다.
+	const std::optional<std::string>& DocumentId() const noexcept { return(m_sDocumentId); }
 	HMENU RuntimeMenu() const noexcept { return(m_hRuntimeMenu); }
 	bool FocusMode() const noexcept { return(m_bFocusMode); }
 	C_DOCUMENT_LIST_SHELL& DocumentListShell() noexcept { return(m_DocumentListShell); }

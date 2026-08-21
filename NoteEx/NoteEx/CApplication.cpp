@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "CApplication.h"
 
+#include "CChangeBus.h"
 #include "CDocumentListShell.h"
 #include "CMain.h"
 #include "CSearchDialog.h"
@@ -41,6 +42,7 @@ namespace
 	constexpr wchar_t DISPATCHER_CLASS[] = L"NoteExApplicationDispatcher";
 	constexpr UINT WM_NOTEEX_NEW_WINDOW = WM_APP + 20;
 	constexpr UINT WM_NOTEEX_RETIRE_WINDOWS = WM_APP + 21;
+	constexpr UINT_PTR MAINTENANCE_TIMER_ID = 1;
 
 	std::string utf8(const std::wstring& _sValue)
 	{
@@ -77,6 +79,14 @@ namespace
 		return(std::chrono::duration_cast<std::chrono::microseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count());
 	}
+
+	// quick_check 요율 제한은 시스템 시각 변경에 흔들리면 안 되므로 단조시계다
+	// (core backup.h 의 MonotonicSecFn 계약 - 벽시계와 재는 것이 다르다).
+	double now_monotonic_seconds()
+	{
+		return(std::chrono::duration<double>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+	}
 }
 
 struct CApplication::S_STATE : CMessageFilter
@@ -106,6 +116,11 @@ struct CApplication::S_STATE : CMessageFilter
 	pynote::core::application::C_WINDOW_LIFECYCLE Lifecycle;
 	std::map<pynote::core::application::WINDOW_TOKEN, std::shared_ptr<C_MAIN>> Windows;
 	std::vector<pynote::core::application::WINDOW_TOKEN> PendingRetirements;
+	std::optional<pynote::shell::S_DATA_POLICY> DataPolicy;
+	std::unique_ptr<pynote::core::storage::C_AUTOMATIC_BACKUP_MANAGER> BackupManager;
+	std::unique_ptr<pynote::core::storage::C_PERIODIC_QUICK_CHECK> QuickCheck;
+	pynote::shell::C_DOCUMENT_CHANGE_BUS ChangeBus;
+	std::map<std::string, pynote::core::application::WINDOW_TOKEN> DocumentWindows;
 	std::atomic<bool> bAcceptNewWindows{ false };
 	HWND hDispatcher{ nullptr };
 	bool bModuleInitialized{ false };
@@ -113,6 +128,7 @@ struct CApplication::S_STATE : CMessageFilter
 	bool bRuntimeFinalized{ false };
 	bool bMessageFilterRegistered{ false };
 	bool bGeometryMigrationAttempted{ false };
+	bool bMaintenanceTimerActive{ false };
 	std::uint64_t nIdentitySequence{ 1 };
 
 	BOOL PreTranslateMessage(MSG* _pMessage) override
@@ -178,6 +194,24 @@ struct CApplication::S_STATE : CMessageFilter
 		Runner.SetBackupHook(std::ref(*MigrationBackup));
 		if (Runner.Run(Database) != pynote::core::storage::E_MIGRATE_RESULT::Ok) { return(false); }
 		if (!this->validate_policy()) { return(false); }
+		// 정책 적재는 open/migration 과 validate_policy 성공 뒤다(원본 AppContext.open).
+		// nullopt 는 원본이 기동을 닫는 자리이므로 여기서도 기동 실패다.
+		DataPolicy = pynote::shell::LoadDataPolicy(Database);
+		if (!DataPolicy) { return(false); }
+		// 자동 유지보수의 백업 디렉터리 규칙은 마이그레이션 훅의 optional 규칙과 다르다
+		// (원본 app.py:446~449 는 빈 설정을 DB 부모/backups 로 접는다). 위 optional 을
+		// 재사용하면 "현재 디렉터리"를 뜻하는 인자와 구별이 사라진다.
+		const std::string sMaintenanceBackupDirectory = sBackupDirectory
+			? *sBackupDirectory
+			: utf8((Absolute.parent_path() / L"backups").native());
+		if (sMaintenanceBackupDirectory.empty()) { return(false); }
+		BackupManager = std::make_unique<pynote::core::storage::C_AUTOMATIC_BACKUP_MANAGER>(
+			BackupService, FileSystem, sDatabasePath, sMaintenanceBackupDirectory,
+			DataPolicy->dBackupIntervalHours, []() { return(now_us()); });
+		QuickCheck = std::make_unique<pynote::core::storage::C_PERIODIC_QUICK_CHECK>(
+			Database.Handle(), DataPolicy->dBackupIntervalHours,
+			[]() { return(now_monotonic_seconds()); });
+		if (!BackupManager->IsValid() || !QuickCheck->IsValid()) { return(false); }
 		Repositories = std::make_unique<pynote::core::storage::C_REPOSITORIES>(Database);
 		CardService = std::make_unique<pynote::core::application::C_CARD_SERVICE>(
 			Database, *Repositories, ParagraphParser, []() { return(now_us()); },
@@ -185,7 +219,8 @@ struct CApplication::S_STATE : CMessageFilter
 		DraftStore = std::make_unique<pynote::core::application::C_REPOSITORY_DRAFT_STORE>(
 			Database, *Repositories);
 		DraftCoordinator = std::make_unique<pynote::core::application::C_DRAFT_COORDINATOR>(
-			*DraftStore, 2000, []() { return(now_us()); }, []() { return(now_us()); },
+			*DraftStore, DataPolicy->nDraftIdleMs,
+			[]() { return(now_us()); }, []() { return(now_us()); },
 			[]() { return(now_us() * 1000); },
 			[this]() { return(this->make_identity("draft")); });
 		SaveCoordinator = std::make_unique<pynote::core::application::C_SAVE_COORDINATOR>(
@@ -227,6 +262,11 @@ struct CApplication::S_STATE : CMessageFilter
 			pState->retire_pending();
 			return(0);
 		}
+		if (_uMessage == WM_TIMER && _wParam == MAINTENANCE_TIMER_ID)
+		{
+			pState->pOwner->RunAutomaticMaintenance();
+			return(0);
+		}
 		return(::DefWindowProcW(_hWnd, _uMessage, _wParam, _lParam));
 	}
 
@@ -243,14 +283,32 @@ struct CApplication::S_STATE : CMessageFilter
 		return(true);
 	}
 
-	std::optional<std::string> choose_document(
-		const std::vector<pynote::core::domain::S_DOCUMENT>& _Documents)
+	// 소유 문서 집합이다. registry 항목과 살아 있는 창의 실제 문서를 합집합으로 본다 -
+	// 외부 소멸 뒤 재채움한 창은 registry 항목이 죽은 문서를 계속 가리키므로 registry
+	// 만 보면 이미 열린 문서를 후보로 다시 내놓아 중복 소유 불변식을 깬다.
+	std::set<std::string> collect_owned_documents(
+		std::optional<pynote::core::application::WINDOW_TOKEN> _Exclude) const
 	{
 		std::set<std::string> Owned;
 		for (const auto& Window : Registry.Snapshot())
 		{
+			if (_Exclude && Window.Token == *_Exclude) { continue; }
 			if (Window.sDocumentId) { Owned.insert(*Window.sDocumentId); }
 		}
+		for (const auto& [Token, Window] : Windows)
+		{
+			if (!Window || (_Exclude && Token == *_Exclude)) { continue; }
+			const auto& sDocumentId = Window->DocumentId();
+			if (sDocumentId) { Owned.insert(*sDocumentId); }
+		}
+		return(Owned);
+	}
+
+	std::optional<std::string> choose_document(
+		const std::vector<pynote::core::domain::S_DOCUMENT>& _Documents,
+		std::optional<pynote::core::application::WINDOW_TOKEN> _Exclude = std::nullopt)
+	{
+		const std::set<std::string> Owned = this->collect_owned_documents(_Exclude);
 		std::vector<pynote::core::application::S_RESTORABLE_DOCUMENT> Candidates;
 		for (const auto& Document : _Documents)
 		{
@@ -274,6 +332,8 @@ struct CApplication::S_STATE : CMessageFilter
 		if (Repositories->CreateDocument(Document) != pynote::core::storage::E_REPO_RESULT::Ok) { return(false); }
 		*_psDocumentId = Document.sId;
 		*_psTitle = Document.sTitle;
+		// 발행 트리거 - 빈 DB 문서 생성 경로(PLAN-W3-0043).
+		pOwner->PublishDocumentChange(Document.sId);
 		return(true);
 	}
 
@@ -312,7 +372,14 @@ struct CApplication::S_STATE : CMessageFilter
 		if (Token == 0) { return(false); }
 		auto Window = std::make_shared<C_MAIN>();
 		Windows.emplace(Token, Window);
-		const std::wstring sTitle = L"NoteEx - " + wide(this->document_title(_sDocumentId));
+		// 창 제목은 seam 조립기 출력 축자다(CAP-FI-015). 빈 제목은 nullopt 로 넘겨야
+		// 조립기의 "문서 없음 = pyNote" 계약이 성립한다(engaged 빈 문자열이면 " — pyNote").
+		std::optional<std::wstring> sDocumentTitle;
+		{
+			std::wstring sRaw = wide(this->document_title(_sDocumentId));
+			if (!sRaw.empty()) { sDocumentTitle = std::move(sRaw); }
+		}
+		const std::wstring sTitle = pynote::shell::ComposeWindowTitle(sDocumentTitle);
 		if (Window->Init(
 			hInstance, pOwner, Token, _sWorkspaceId, _sDocumentId, sTitle, bFirstGeometry))
 		{
@@ -437,9 +504,89 @@ struct CApplication::S_STATE : CMessageFilter
 		};
 	}
 
+	// 원본 _refresh_document_mapping(app.py:850~857) 의 하드 불변식이다. 한 문서가
+	// 두 창에 열려 있으면 조용히 무시하지 않고 실패로 돌려준다.
+	bool refresh_document_mapping()
+	{
+		DocumentWindows.clear();
+		bool bOk = true;
+		for (const auto& Window : Registry.Snapshot())
+		{
+			const auto it = Windows.find(Window.Token);
+			if (it == Windows.end() || !it->second) { continue; }
+			const auto& sDocumentId = it->second->DocumentId();
+			if (!sDocumentId) { continue; }
+			if (!DocumentWindows.emplace(*sDocumentId, Window.Token).second)
+			{
+				DBGPRINT(L"문서가 둘 이상의 창에 열렸습니다");
+				bOk = false;
+			}
+		}
+		return(bOk);
+	}
+
+	// 원본 _activate_window(app.py:1082~1089) 의 4 단이다.
+	bool activate_window(pynote::core::application::WINDOW_TOKEN _Token)
+	{
+		const auto it = Windows.find(_Token);
+		if (it == Windows.end() || !it->second || !::IsWindow(it->second->m_hWnd)) { return(false); }
+		const HWND hWindow = it->second->m_hWnd;
+		if (::IsIconic(hWindow)) { ::ShowWindow(hWindow, SW_RESTORE); }
+		else { ::ShowWindow(hWindow, SW_SHOW); }
+		::BringWindowToTop(hWindow);
+		// 전경 전환은 OS 규칙상 거절될 수 있다 - 시도하되 활성 토큰 등록이 관측 지점이다.
+		::SetForegroundWindow(hWindow);
+		return(Registry.Activate(_Token));
+	}
+
+	// 원본 _prepare_window_for_input(app.py:860~) - 열 수 있는 문서가 없으면 만든다.
+	std::optional<std::string> choose_refill_document(
+		pynote::core::application::WINDOW_TOKEN _Token)
+	{
+		std::vector<pynote::core::domain::S_DOCUMENT> Documents;
+		if (Repositories->ListDocuments(&Documents) != pynote::core::storage::E_REPO_RESULT::Ok)
+		{
+			return(std::nullopt);
+		}
+		if (auto Chosen = this->choose_document(Documents, _Token)) { return(Chosen); }
+		std::string sCreatedId;
+		std::string sCreatedTitle;
+		if (!this->create_document(&sCreatedId, &sCreatedTitle)) { return(std::nullopt); }
+		return(sCreatedId);
+	}
+
+	// 원본 _report_maintenance_failure(app.py:979~982). 부모는 첫 번째 살아 있는 창이고
+	// 없으면 무부모다. 실패해도 프로세스는 계속 산다.
+	void report_maintenance_failure(const std::string& _sError)
+	{
+		DBGPRINT(L"자동 유지보수 실패를 사용자에게 알립니다");
+		HWND hParent = nullptr;
+		for (const auto& Window : Registry.Snapshot())
+		{
+			const auto it = Windows.find(Window.Token);
+			if (it != Windows.end() && it->second && ::IsWindow(it->second->m_hWnd))
+			{
+				hParent = it->second->m_hWnd;
+				break;
+			}
+		}
+		const std::wstring sMessage =
+			L"자동 백업 전 DB 무결성 검사 또는 백업에 실패했습니다: " + wide(_sError);
+		::MessageBoxW(hParent, sMessage.c_str(), L"자동 백업 실패",
+			MB_OK | MB_ICONERROR | MB_APPLMODAL);
+	}
+
+	void stop_maintenance_timer()
+	{
+		if (!bMaintenanceTimerActive) { return; }
+		if (::IsWindow(hDispatcher)) { ::KillTimer(hDispatcher, MAINTENANCE_TIMER_ID); }
+		bMaintenanceTimerActive = false;
+	}
+
 	void finalize_for_loop_exit()
 	{
 		if (bRuntimeFinalized) { return; }
+		this->stop_maintenance_timer();
 		bAcceptNewWindows.store(false);
 		Instance.SetNewWindowHandler({});
 		BrushCache.Shutdown();
@@ -451,6 +598,8 @@ struct CApplication::S_STATE : CMessageFilter
 		DraftCoordinator.reset();
 		DraftStore.reset();
 		CardService.reset();
+		QuickCheck.reset();
+		BackupManager.reset();
 		Repositories.reset();
 		Database.Close();
 		Instance.Close();
@@ -527,11 +676,20 @@ CApplication::E_INITIALIZE_RESULT CApplication::Initialize(
 		return(E_INITIALIZE_RESULT::Failure);
 	}
 	m_pState->bAcceptNewWindows.store(true);
+	// 순수 seam 은 전역 로거에 닿지 못한다 - 구독자 실패를 남길 자리를 여기서 준다.
+	m_pState->ChangeBus.SetErrorSink(
+		[](const std::string&) { DBGPRINT(L"문서 변경 구독자가 실패했습니다"); });
 	if (!m_pState->restore_windows())
 	{
 		this->Shutdown();
 		return(E_INITIALIZE_RESULT::Failure);
 	}
+	if (!m_pState->refresh_document_mapping())
+	{
+		this->Shutdown();
+		return(E_INITIALIZE_RESULT::Failure);
+	}
+	this->StartAutomaticMaintenance();
 	m_pState->Instance.SetNewWindowHandler([State = m_pState.get()]() {
 		if (State->bAcceptNewWindows.load() && ::IsWindow(State->hDispatcher))
 		{
@@ -549,6 +707,7 @@ int CApplication::Run()
 void CApplication::Shutdown()
 {
 	if (!m_pState) { return; }
+	m_pState->stop_maintenance_timer();
 	m_pState->bAcceptNewWindows.store(false);
 	m_pState->Instance.SetNewWindowHandler({});
 	for (auto& [Token, Window] : m_pState->Windows)
@@ -575,6 +734,8 @@ void CApplication::Shutdown()
 	m_pState->DraftCoordinator.reset();
 	m_pState->DraftStore.reset();
 	m_pState->CardService.reset();
+	m_pState->QuickCheck.reset();
+	m_pState->BackupManager.reset();
 	m_pState->Repositories.reset();
 	m_pState->Database.Close();
 	m_pState->Instance.Close();
@@ -647,6 +808,104 @@ void CApplication::NotifyWindowNcDestroy(pynote::core::application::WINDOW_TOKEN
 	{
 		::PostMessageW(m_pState->hDispatcher, WM_NOTEEX_RETIRE_WINDOWS, 0, 0);
 	}
+}
+
+pynote::shell::C_DOCUMENT_CHANGE_BUS& CApplication::ChangeBus()
+{
+	return(m_pState->ChangeBus);
+}
+
+bool CApplication::PublishDocumentChange(const std::string& _sDocumentId)
+{
+	if (_sDocumentId.empty()) { return(false); }
+	// 원본 publish 2 단(app.py:672~675) - 동기 전파 뒤 소유 매핑 재계산이다.
+	m_pState->ChangeBus.Publish(_sDocumentId);
+	return(m_pState->refresh_document_mapping());
+}
+
+bool CApplication::OpenDocument(
+	pynote::core::application::WINDOW_TOKEN _Requesting, const std::string& _sDocumentId)
+{
+	if (_sDocumentId.empty() || !m_pState->Registry.Contains(_Requesting)) { return(false); }
+	if (!m_pState->refresh_document_mapping()) { return(false); }
+	std::optional<pynote::core::application::WINDOW_TOKEN> Owner;
+	const auto it = m_pState->DocumentWindows.find(_sDocumentId);
+	if (it != m_pState->DocumentWindows.end()) { Owner = it->second; }
+	if (pynote::shell::ResolveOpenDocumentTarget(Owner, _Requesting) ==
+		pynote::shell::E_OPEN_DOCUMENT_TARGET::ActivateOwner)
+	{
+		return(m_pState->activate_window(*Owner));
+	}
+	// 요청 창이 이미 그 문서를 들고 있으면 그 창을 앞으로 가져오는 것이 전부다.
+	// 다른 문서로의 제자리 전환은 문서 관리 UI(W7) 소유라 여기서 발명하지 않는다.
+	if (Owner && *Owner == _Requesting) { return(m_pState->activate_window(_Requesting)); }
+	DBGPRINT(L"요청 창의 제자리 문서 전환은 W7 소유입니다");
+	return(false);
+}
+
+std::optional<std::string> CApplication::DocumentTitle(const std::string& _sDocumentId)
+{
+	if (_sDocumentId.empty() || !m_pState->Repositories) { return(std::nullopt); }
+	pynote::core::domain::S_DOCUMENT Document;
+	if (m_pState->Repositories->GetDocument(_sDocumentId, &Document) !=
+		pynote::core::storage::E_REPO_RESULT::Ok)
+	{
+		return(std::nullopt);
+	}
+	return(Document.sTitle);
+}
+
+std::optional<std::string> CApplication::ChooseRefillDocument(
+	pynote::core::application::WINDOW_TOKEN _Token)
+{
+	if (!m_pState->Repositories) { return(std::nullopt); }
+	return(m_pState->choose_refill_document(_Token));
+}
+
+void CApplication::StartAutomaticMaintenance()
+{
+	// 원본 start_automatic_maintenance(app.py:470~475) - 이미 활성인 타이머면
+	// 즉시 실행 없이 반환한다(멱등).
+	if (m_pState->bMaintenanceTimerActive) { return; }
+	if (!m_pState->DataPolicy || !::IsWindow(m_pState->hDispatcher)) { return; }
+	this->RunAutomaticMaintenance();
+	const std::int64_t nIntervalMs = pynote::shell::ClampMaintenanceIntervalMs(
+		m_pState->DataPolicy->dBackupIntervalHours);
+	if (nIntervalMs <= 0) { return; }
+	if (::SetTimer(m_pState->hDispatcher, MAINTENANCE_TIMER_ID,
+		static_cast<UINT>(nIntervalMs), nullptr) == 0)
+	{
+		DBGPRINT(L"자동 유지보수 타이머 등록에 실패했습니다");
+		return;
+	}
+	m_pState->bMaintenanceTimerActive = true;
+}
+
+bool CApplication::RunAutomaticMaintenance()
+{
+	if (!m_pState->QuickCheck || !m_pState->BackupManager) { return(false); }
+	// 원본 run_automatic_maintenance(app.py:477~487) - quick_check(force) 가 성공해야
+	// 백업이 돈다. 실패는 모달로 알리되 프로세스는 계속 산다.
+	std::string sError;
+	if (m_pState->QuickCheck->RunIfDue(true) == pynote::core::storage::E_QUICK_CHECK_RESULT::Failed)
+	{
+		sError = m_pState->QuickCheck->LastError();
+		if (sError.empty()) { sError = "quick_check failed"; }
+	}
+	else
+	{
+		bool bCreated = false;
+		std::string sDestination;
+		if (m_pState->BackupManager->RunIfDue(false, &bCreated, &sDestination) !=
+			pynote::core::storage::E_BACKUP_RESULT::Ok)
+		{
+			sError = m_pState->BackupManager->LastError();
+			if (sError.empty()) { sError = "automatic backup failed"; }
+		}
+	}
+	if (sError.empty()) { return(true); }
+	m_pState->report_maintenance_failure(sError);
+	return(false);
 }
 
 bool CApplication::PersistWindowState(

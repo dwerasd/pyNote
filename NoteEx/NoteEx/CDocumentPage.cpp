@@ -99,8 +99,17 @@ struct C_DOCUMENT_PAGE::S_STATE
 	std::optional<std::string> sCurrentCardId{};
 	std::vector<std::string> ListCardIds;
 	C_DOCUMENT_PAGE::LeavePrompt LeavePrompt;
+	C_DOCUMENT_PAGE::ChangeNotifier Notifier;
 	bool bSynchronizing{ false };
 	bool bCleaned{ false };
+	bool bCardSaveFailed{ false };
+
+	// 카드 생성·저장 완료 지점에서만 부른다. 통지 대상(창)이 다시 이 페이지를
+	// 건드릴 수 있으므로 호출부의 상태 갱신이 끝난 자리에서 부른다.
+	void notify_change() const
+	{
+		if (Notifier) { Notifier(); }
+	}
 
 	std::string editor_text() const
 	{
@@ -202,6 +211,7 @@ struct C_DOCUMENT_PAGE::S_STATE
 			const auto Captured = FirstInput->OnMeaningfulInsertion(sText, _eSource);
 			if (Captured.eEffect == app::E_FIRST_INPUT_EFFECT::CreationFailed) { return(false); }
 			if (Captured.sConnectedCardId && !this->open_card(*Captured.sConnectedCardId, false)) { return(false); }
+			if (Captured.sConnectedCardId) { this->notify_change(); }
 		}
 		if (!sDraftId) { return(true); }
 		const auto Updated = pDraftCoordinator->UpdateSession(*sDraftId, sText, nCursor,
@@ -266,6 +276,15 @@ bool C_DOCUMENT_PAGE::Init(
 		_sWorkspaceId.empty() || _sDocumentId.empty()) { return(false); }
 	m_sDocumentId = _sDocumentId;
 	auto& State = *m_pState;
+	// 재채움 경로(외부 문서 소멸 뒤)는 Cleanup 한 페이지를 같은 객체로 다시 연다.
+	// Cleanup 이 남긴 표식과 잔여 식별자를 여기서 걷지 않으면 Layout·Cleanup 이
+	// 즉시 반환하고 이전 문서의 선택이 새 문서로 새어 든다.
+	State.bCleaned = false;
+	State.bSynchronizing = false;
+	State.bCardSaveFailed = false;
+	State.sDraftId.reset();
+	State.sCurrentCardId.reset();
+	State.ListCardIds.clear();
 	State.hInstance = _hInstance;
 	State.hListHost = _hListHost;
 	State.hEditorHost = _hEditorHost;
@@ -335,6 +354,11 @@ bool C_DOCUMENT_PAGE::Init(
 	this->Layout();
 	::SetFocus(State.hEditor);
 	return(true);
+}
+
+void C_DOCUMENT_PAGE::SetChangeNotifier(ChangeNotifier _Notifier)
+{
+	m_pState->Notifier = std::move(_Notifier);
 }
 
 bool C_DOCUMENT_PAGE::PreTranslateMessage(MSG* _pMessage)
@@ -455,6 +479,8 @@ bool C_DOCUMENT_PAGE::Cleanup()
 		*pWindow = nullptr;
 	}
 	if (m_pState->hRichEdit) { ::FreeLibrary(m_pState->hRichEdit); m_pState->hRichEdit = nullptr; }
+	// 정리된 페이지가 창에 통지하면 이미 떼어진 자식 HWND 를 다시 읽게 된다.
+	m_pState->Notifier = {};
 	m_pState->bCleaned = true;
 	return(bOk);
 }
@@ -490,14 +516,25 @@ bool C_DOCUMENT_PAGE::Save()
 	const auto Result = m_pState->pSaveCoordinator->Save(*m_pState->sDraftId);
 	if (Result.eOutcome != app::E_SAVE_OUTCOME::Saved && Result.eOutcome != app::E_SAVE_OUTCOME::Unchanged)
 	{
+		// 원본은 카드 저장 실패만 latch 한다(card_editor.py:137~139).
+		m_pState->bCardSaveFailed = true;
 		return(false);
 	}
+	m_pState->bCardSaveFailed = false;
 	if (Result.Card)
 	{
 		m_pState->sCurrentCardId = Result.Card->sId;
 		m_pState->Projection->UpdateCard(*Result.Card);
 		m_pState->Projection->SetCardDirty(Result.Card->sId, false);
 	}
+	if (!m_pState->refresh_cards()) { return(false); }
+	m_pState->notify_change();
+	return(true);
+}
+
+bool C_DOCUMENT_PAGE::Refresh()
+{
+	if (!m_pState || m_pState->bCleaned) { return(false); }
 	return(m_pState->refresh_cards());
 }
 
@@ -532,9 +569,17 @@ bool C_DOCUMENT_PAGE::IsHistoryVisible() const noexcept
 {
 	return(m_pState->hHistory && ::IsWindowVisible(m_pState->hHistory));
 }
+bool C_DOCUMENT_PAGE::HasSession() const noexcept
+{
+	return(m_pState && m_pState->sDraftId.has_value());
+}
 bool C_DOCUMENT_PAGE::HasDirtySession() const
 {
 	if (!m_pState->sDraftId) { return(false); }
 	const auto Session = m_pState->pDraftCoordinator->Session(*m_pState->sDraftId);
 	return(Session && Session->bDirty);
+}
+bool C_DOCUMENT_PAGE::HasSaveFailed() const noexcept
+{
+	return(m_pState && m_pState->bCardSaveFailed);
 }

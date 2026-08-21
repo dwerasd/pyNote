@@ -389,6 +389,20 @@ public static class NoteExWindowProbe
 		}
 		return posted;
 	}
+
+	[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+	private static extern IntPtr SendMessageBuffer(IntPtr window, uint message, UIntPtr wParam, StringBuilder lParam);
+
+	// 상태 바는 창 텍스트가 아니라 파트 텍스트를 갖는다. SB_GETTEXTLENGTHW(0x040C) 가
+	// 하위 워드에 길이를 주고 SB_GETTEXTW(0x040D) 가 그 버퍼를 채운다.
+	public static string StatusPartText(IntPtr status, int part)
+	{
+		var length = SendMessage(status, 0x040C, new UIntPtr((uint)part), IntPtr.Zero).ToInt32() & 0xFFFF;
+		if (length <= 0) return String.Empty;
+		var buffer = new StringBuilder(length + 1);
+		SendMessageBuffer(status, 0x040D, new UIntPtr((uint)part), buffer);
+		return buffer.ToString();
+	}
 }
 '@
 
@@ -549,6 +563,9 @@ $predicates = [ordered]@{
     ModelessSearchQueryFocus = $false
     FocusModeHidesAndRestoresShell = $false
     RestartRestoresPageUiState = $false
+    StatusBarReflectsPasteAndSave = $false
+    WindowTitleShowsDocumentTitle = $false
+    StartupMaintenanceProducesBackup = $false
 }
 
 $ownedProcesses = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
@@ -708,6 +725,30 @@ try {
     $shellWindow = $windows[0].Handle
     $shellTitle = $windows[0].Title
 
+    # W3 창 제목 계약: "{문서 제목} — pyNote" 축자다(CAP-FI-015). 문서 제목 부분이
+    # 비면 접미사만 남으므로 길이로 그 자리를 함께 굳힌다.
+    $titleSuffix = ' — pyNote'
+    $predicates.WindowTitleShowsDocumentTitle =
+        @($windows).Count -eq 2 -and
+        (@($windows | Where-Object {
+            $_.Title.EndsWith($titleSuffix, [StringComparison]::Ordinal) -and
+            $_.Title.Length -gt $titleSuffix.Length
+        }).Count -eq 2)
+
+    # 기동 유지보수가 격리 루트 안 backups/ 에 자동 백업 산출물을 남긴다. 백업 디렉터리
+    # 규칙은 backup/location 이 비면 DB 부모/backups 다(원본 app.py:446~449). 기본 사용자
+    # 자산 불변은 같은 자리에서 함께 본다 - 이 술어가 사용자 DB/레지스트리를 건드리는
+    # 백업 경로를 통과시키면 안 된다.
+    $backupDirectory = Join-Path (Split-Path -Parent $database) 'backups'
+    $backupAppeared = Wait-Condition {
+        (Test-Path -LiteralPath $backupDirectory -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $backupDirectory -File -Filter '*.auto-*.sqlite3').Count -ge 1
+    }
+    $predicates.StartupMaintenanceProducesBackup =
+        $backupAppeared -and
+        ((Get-DatabaseFingerprint $defaultDatabase) -ceq $defaultBefore) -and
+        ((Get-RegistryFingerprint) -ceq $registryBefore)
+
     # G4-1: 실제 상태바/목록/편집기/이력 자식 HWND. 자리표시 페인트 호스트가 아님을 클래스로 굳힌다.
     $status = [NoteExWindowProbe]::ChildById($shellWindow, 2106)       # IDC_MAIN_STATUS
     $cardList = [NoteExWindowProbe]::ChildById($shellWindow, 2101)     # IDC_DOCUMENT_CARD_LIST
@@ -780,6 +821,13 @@ try {
         $bodyPersisted -and
         (Get-LiveDatabaseFingerprint (Copy-LiveDatabase $database $scanRoot)) -cne
             (Get-LiveDatabaseFingerprint $afterPaste)
+
+    # 붙여넣기·저장 뒤 상태 바가 seam 조립기 문안 축자다. 문자 수는 코드포인트 계수라
+    # 여기 본문(ASCII)에서는 .NET 길이와 같다 - 계수 단위 자체는 G3' 시험이 한국어로 굳힌다.
+    $expectedStatus = "1개 카드 · $($savedBody.Length)자 · 모든 변경 저장됨 · 로컬 DB"
+    $predicates.StatusBarReflectsPasteAndSave = Wait-Condition -TimeoutSeconds 5 -Condition {
+        [NoteExWindowProbe]::StatusPartText($status, 0) -ceq $expectedStatus
+    }
 
     # G4-4: Ctrl+F 는 찾기만, Ctrl+H 는 바꾸기까지 보이고 각각 그 입력에 포커스를 준다.
     $findHiddenBefore = -not [NoteExWindowProbe]::IsWindowVisible($findInput) -and

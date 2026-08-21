@@ -79,6 +79,7 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_import_support.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_single_instance.h" />
     <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h" />
+	<ClInclude Include="..\NoteEx\CChangeBus.h" />
 	<ClInclude Include="..\NoteEx\CWindowLayout.h" />
 	<ClInclude Include="..\NoteEx\CDocumentListShell.h" />
 	<ClInclude Include="..\NoteEx\CDocumentPage.h" />
@@ -129,6 +130,7 @@
     <ClCompile Include="..\platform\src\win32_import_support.cpp" />
     <ClCompile Include="..\platform\src\win32_single_instance.cpp" />
     <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp" />
+	<ClCompile Include="..\NoteEx\CChangeBus.cpp" />
 	<ClCompile Include="..\NoteEx\CWindowLayout.cpp" />
 	<ClCompile Include="..\NoteEx\CDocumentListShell.cpp" />
 	<ClCompile Include="..\NoteEx\CDocumentPage.cpp" />
@@ -143,6 +145,7 @@
     <ClCompile Include="harness\src\rich_edit_p1_probe_test.cpp" />
 	<ClCompile Include="harness\src\window_layout_test.cpp" />
 	<ClCompile Include="harness\src\w3_shell_consumer_test.cpp" />
+	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
       <!-- 상류 원본이라 경고를 손대지 않는다. -->
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
