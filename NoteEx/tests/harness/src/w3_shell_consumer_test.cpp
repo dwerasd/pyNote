@@ -615,3 +615,26 @@ TEST_CASE("CAP-FI-035 leave approval keeps the clean session so persisted state 
 	REQUIRE(window_text(Page.EditorHwnd()).empty());
 	REQUIRE(::GetFocus() == Page.CardListHwnd());
 }
+
+// 대응 원본: card_editor.py request_close → can_leave_editor(protect_now=True) — 더티 세션은 저장/버리기 프롬프트
+// 전에 초안을 DB 에 보호하고, Cancel 을 골라도 초안은 남는다(보호 실패면 이탈 거부). 반박 감사 M-02(2026-08-22).
+TEST_CASE("CAP-FI-026 back on a dirty editor protects the draft before the leave prompt",
+	"[W3-shell-spine][WTL-CAP-FI-026]")
+{
+	C_PAGE_FIXTURE Fixture;
+	auto& Page = Fixture.Page();
+	Fixture.Paste(L"protect body");
+	REQUIRE(Page.Save());
+	Fixture.Type(L'!');
+	REQUIRE(Page.HasDirtySession());
+	Fixture.LeaveChoice = C_DOCUMENT_PAGE::E_LEAVE_CHOICE::Cancel;
+	REQUIRE(Page.RequestLeave() == app::E_LEAVE_RESULT::Denied);
+	REQUIRE(Page.HasDirtySession());
+	std::vector<domain::S_DRAFT> Drafts;
+	REQUIRE(Fixture.Repositories().ListDrafts(C_PAGE_FIXTURE::DocumentId, &Drafts) == storage::E_REPO_RESULT::Ok);
+	REQUIRE(Drafts.size() == 1);
+	REQUIRE(Drafts.front().sDraftText == "protect body!");
+	Fixture.LeaveChoice = C_DOCUMENT_PAGE::E_LEAVE_CHOICE::Save;
+	REQUIRE(Page.RequestLeave() == app::E_LEAVE_RESULT::ApprovedAfterSave);
+	REQUIRE_FALSE(Page.HasSession());
+}

@@ -451,6 +451,10 @@ app::E_LEAVE_RESULT C_DOCUMENT_PAGE::CanLeave()
 
 app::E_LEAVE_RESULT C_DOCUMENT_PAGE::RequestLeave()
 {
+	// 원본 request_close → can_leave_editor(protect_now=True): 더티 세션은 프롬프트 전에 초안을 보호하고
+	// 보호 실패면 이탈을 거부한다(깨끗한 세션은 ProtectNow 가 NoOp). 참가자 승인(CanLeave)에는 이 단계가
+	// 없다(원본 can_leave_open_pages 는 protect_now 기본값 False).
+	if (m_pState->sDraftId && !this->Protect()) { ::SetFocus(m_pState->hEditor); return(app::E_LEAVE_RESULT::Denied); }
 	const auto Result = this->CanLeave();
 	if (Result == app::E_LEAVE_RESULT::Denied) { return(Result); }
 	if (m_pState->sDraftId)
