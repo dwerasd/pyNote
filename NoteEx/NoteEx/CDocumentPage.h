@@ -47,6 +47,10 @@ public:
 	void SetChangeNotifier(ChangeNotifier _Notifier);
 	bool PreTranslateMessage(MSG* _pMessage);
 	bool Protect();
+	// 이탈 승인만(원본 card_editor.can_leave_editor) - 깨끗한 세션은 그대로 둔다. 창 닫기·앱 종료의
+	// 영속이 편집기 카드를 기록하려면 승인 뒤에도 세션이 살아 있어야 한다(main_window.py:421~431).
+	pynote::core::application::E_LEAVE_RESULT CanLeave();
+	// 승인 + 세션 해제 + 편집면 비움 + 목록 포커스(원본 request_close - Back/Esc 경로).
 	pynote::core::application::E_LEAVE_RESULT RequestLeave();
 	bool PersistState(const std::optional<std::pair<int, int>>& _SplitSizesDip);
 	bool Cleanup();

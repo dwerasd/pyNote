@@ -340,7 +340,9 @@ bool C_MAIN::Protect()
 
 pynote::core::application::E_LEAVE_RESULT C_MAIN::RequestLeave()
 {
-	return(m_DocumentPage.RequestLeave());
+	// 창 닫기·앱 종료 참가자의 이탈 단계는 승인만이다(원본 closeEvent: can_leave_open_pages 뒤
+	// persist_open_page_ui_states) - 세션 해제는 persist 뒤 Cleanup 이 맡는다.
+	return(m_DocumentPage.CanLeave());
 }
 
 bool C_MAIN::PersistState()

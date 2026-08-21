@@ -412,42 +412,33 @@ bool C_DOCUMENT_PAGE::Protect()
 	return(Result.eOutcome == app::E_DRAFT_OUTCOME::Ok || Result.eOutcome == app::E_DRAFT_OUTCOME::NoOp);
 }
 
-app::E_LEAVE_RESULT C_DOCUMENT_PAGE::RequestLeave()
+app::E_LEAVE_RESULT C_DOCUMENT_PAGE::CanLeave()
 {
-	if (!m_pState->sDraftId) { this->FocusCardList(); return(app::E_LEAVE_RESULT::ApprovedClean); }
+	if (!m_pState->sDraftId) { return(app::E_LEAVE_RESULT::ApprovedClean); }
 	const std::string sDraftId = *m_pState->sDraftId;
 	const auto Session = m_pState->pDraftCoordinator->Session(sDraftId);
 	if (!Session) { return(app::E_LEAVE_RESULT::Denied); }
-	app::E_LEAVE_RESULT Result = app::E_LEAVE_RESULT::ApprovedClean;
-	bool bReleased = false;
-	if (Session->bDirty)
+	// 깨끗한 세션은 승인만 한다(원본 can_leave_editor: session.dirty 가 아니면 True) - 세션을 여기서
+	// 풀면 앱 종료의 persist(승인 뒤)가 편집기 카드를 잃는다(실측 2026-08-21 D-04: 재시작 복원 실패).
+	if (!Session->bDirty) { return(app::E_LEAVE_RESULT::ApprovedClean); }
+	E_LEAVE_CHOICE eChoice = E_LEAVE_CHOICE::Cancel;
+	if (m_pState->LeavePrompt) { eChoice = m_pState->LeavePrompt(m_pState->hEditor); }
+	else
 	{
-		E_LEAVE_CHOICE eChoice = E_LEAVE_CHOICE::Cancel;
-		if (m_pState->LeavePrompt) { eChoice = m_pState->LeavePrompt(m_pState->hEditor); }
-		else
-		{
-			const int nChoice = ::MessageBoxW(m_pState->hEditor,
-				L"변경 내용을 저장하고 편집을 닫으시겠습니까?", L"NoteEx",
-				MB_YESNOCANCEL | MB_ICONQUESTION);
-			eChoice = nChoice == IDYES ? E_LEAVE_CHOICE::Save :
-				nChoice == IDNO ? E_LEAVE_CHOICE::Discard : E_LEAVE_CHOICE::Cancel;
-		}
-		if (eChoice == E_LEAVE_CHOICE::Cancel) { ::SetFocus(m_pState->hEditor); return(app::E_LEAVE_RESULT::Denied); }
-		if (eChoice == E_LEAVE_CHOICE::Save)
-		{
-			if (!this->Save()) { ::SetFocus(m_pState->hEditor); return(app::E_LEAVE_RESULT::Denied); }
-			Result = app::E_LEAVE_RESULT::ApprovedAfterSave;
-		}
-		else
-		{
-			if (m_pState->pDraftCoordinator->DiscardSession(sDraftId).eOutcome != app::E_DRAFT_OUTCOME::Ok)
-			{
-				return(app::E_LEAVE_RESULT::Denied);
-			}
-			bReleased = true;
-		}
+		const int nChoice = ::MessageBoxW(m_pState->hEditor,
+			L"변경 내용을 저장하고 편집을 닫으시겠습니까?", L"NoteEx",
+			MB_YESNOCANCEL | MB_ICONQUESTION);
+		eChoice = nChoice == IDYES ? E_LEAVE_CHOICE::Save :
+			nChoice == IDNO ? E_LEAVE_CHOICE::Discard : E_LEAVE_CHOICE::Cancel;
 	}
-	if (!bReleased && m_pState->pDraftCoordinator->ReleaseSession(sDraftId).eOutcome != app::E_DRAFT_OUTCOME::Ok)
+	if (eChoice == E_LEAVE_CHOICE::Cancel) { ::SetFocus(m_pState->hEditor); return(app::E_LEAVE_RESULT::Denied); }
+	if (eChoice == E_LEAVE_CHOICE::Save)
+	{
+		if (!this->Save()) { ::SetFocus(m_pState->hEditor); return(app::E_LEAVE_RESULT::Denied); }
+		return(app::E_LEAVE_RESULT::ApprovedAfterSave);
+	}
+	// 버리기는 원본도 승인 단계에서 세션을 버리고 편집면을 비운다(can_leave_editor 의 else 분기).
+	if (m_pState->pDraftCoordinator->DiscardSession(sDraftId).eOutcome != app::E_DRAFT_OUTCOME::Ok)
 	{
 		return(app::E_LEAVE_RESULT::Denied);
 	}
@@ -455,6 +446,24 @@ app::E_LEAVE_RESULT C_DOCUMENT_PAGE::RequestLeave()
 	m_pState->sCurrentCardId.reset();
 	m_pState->FirstInput->ResetAfterAcceptedClose();
 	m_pState->set_editor_text({});
+	return(app::E_LEAVE_RESULT::ApprovedClean);
+}
+
+app::E_LEAVE_RESULT C_DOCUMENT_PAGE::RequestLeave()
+{
+	const auto Result = this->CanLeave();
+	if (Result == app::E_LEAVE_RESULT::Denied) { return(Result); }
+	if (m_pState->sDraftId)
+	{
+		if (m_pState->pDraftCoordinator->ReleaseSession(*m_pState->sDraftId).eOutcome != app::E_DRAFT_OUTCOME::Ok)
+		{
+			return(app::E_LEAVE_RESULT::Denied);
+		}
+		m_pState->sDraftId.reset();
+		m_pState->sCurrentCardId.reset();
+		m_pState->FirstInput->ResetAfterAcceptedClose();
+		m_pState->set_editor_text({});
+	}
 	this->FocusCardList();
 	return(Result);
 }

@@ -159,10 +159,18 @@ public static class NoteExWindowProbe
 		return result;
 	}
 
+	[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+	private static extern IntPtr SendMessageBuffer(IntPtr window, uint message, UIntPtr wParam, StringBuilder lParam);
+
+	// GetWindowText 는 다른 프로세스의 컨트롤 본문을 읽지 못한다(캡션 없는 컨트롤은 빈 문자열이다).
+	// WM_GETTEXT 는 OS 가 프로세스 경계를 마샬링하므로 그쪽으로 읽는다(실측 2026-08-21 D-04 1차 -
+	// 편집기 본문이 항상 비어 ListEnter 술어가 거짓이었다).
 	public static string WindowTextValue(IntPtr window)
 	{
-		var value = new StringBuilder(32768);
-		GetWindowText(window, value, value.Capacity);
+		var length = SendMessage(window, 0x000E, UIntPtr.Zero, IntPtr.Zero).ToInt32();   // WM_GETTEXTLENGTH
+		if (length <= 0) return String.Empty;
+		var value = new StringBuilder(length + 1);
+		SendMessageBuffer(window, 0x000D, new UIntPtr((uint)(length + 1)), value);   // WM_GETTEXT
 		return value.ToString();
 	}
 
@@ -314,9 +322,36 @@ public static class NoteExWindowProbe
 		return SendMessage(window, message, wParam, lParam);
 	}
 
+	// 전경 전환은 호출 프로세스에 전경 권한이 있어야 성립한다(SetForegroundWindow 제약). 배경 pwsh 는
+	// 권한이 없을 때가 있어 활성화·가속기가 한꺼번에 실패했다(실측 2026-08-21 D-04, 실행마다 흔들림).
+	// 현재 전경 스레드에 입력 큐를 붙여 전환하고, 그래도 거부되면 합성 입력(Shift 탭)으로 "마지막 입력
+	// 프로세스"가 된 뒤 재시도한다. 반환값은 실제 전경이 그 창인지다 - 호출부는 참일 때만 진행한다.
 	public static bool Activate(IntPtr window)
 	{
-		return SetForegroundWindow(window);
+		if (GetForegroundWindow() == window) return true;
+		var foreground = GetForegroundWindow();
+		uint foregroundProcess;
+		var foregroundThread = foreground != IntPtr.Zero ? GetWindowThreadProcessId(foreground, out foregroundProcess) : 0u;
+		var self = GetCurrentThreadId();
+		var attached = foregroundThread != 0 && foregroundThread != self && AttachThreadInput(self, foregroundThread, true);
+		try
+		{
+			SetForegroundWindow(window);
+			if (GetForegroundWindow() != window)
+			{
+				keybd_event(0x10, 0, 0, UIntPtr.Zero);
+				keybd_event(0x10, 0, 2, UIntPtr.Zero);
+				SetForegroundWindow(window);
+			}
+			var deadline = DateTime.UtcNow.AddSeconds(2);
+			while (GetForegroundWindow() != window && DateTime.UtcNow < deadline)
+			{
+				System.Threading.Thread.Sleep(25);
+				SetForegroundWindow(window);
+			}
+			return GetForegroundWindow() == window;
+		}
+		finally { if (attached) AttachThreadInput(self, foregroundThread, false); }
 	}
 
 	public static string ClassNameOf(IntPtr window)
@@ -377,31 +412,76 @@ public static class NoteExWindowProbe
 	// SendChord 와 같은 규약이되 수식 키가 여러 개이고 게시 대상 창을 따로 지정한다.
 	// Ctrl+Enter 는 편집기 HWND 로 가야 페이지 pre-translation 이 받고, 가속기는 활성 창
 	// 큐의 GetKeyState 로 수식 키를 읽으므로 활성화가 먼저다.
+	[DllImport("user32.dll")]
+	private static extern IntPtr GetForegroundWindow();
+	[DllImport("user32.dll")]
+	private static extern bool AttachThreadInput(uint attach, uint attachTo, bool attaching);
+	[DllImport("kernel32.dll")]
+	private static extern uint GetCurrentThreadId();
+
+	// 수식 키와 본 키를 전부 실입력(keybd_event)으로 보낸다. 종전엔 수식 키만 입력 큐, 본 키는
+	// PostMessage 였는데 GetMessage 는 포스트 메시지를 입력보다 먼저 꺼내므로 대상 스레드가 바쁘면
+	// 본 키가 Ctrl 보다 먼저 처리돼 가속기가 간헐 실패했다(실측 2026-08-21 D-04: Ctrl+S 미저장 →
+	// 더티 종료 프롬프트 → 종료 대기 타임아웃). 활성화는 Activate(전경 권한 획득·검증)로 하고,
+	// 전경이 실제로 바뀐 뒤에만 입력을 보낸다.
+	// target 은 실입력이 포커스 창으로 가는 성질상 참고값이다 - 포커스가 그 창 트리 안에 있는지는
+	// 호출부 술어(FocusedWindow)가 본다.
 	public static bool SendChordEx(IntPtr activate, IntPtr target, byte[] modifiers, byte key)
 	{
-		SetForegroundWindow(activate);
+		if (!Activate(activate)) return false;
 		foreach (var modifier in modifiers) keybd_event(modifier, 0, 0, UIntPtr.Zero);
-		var posted = PostMessage(target, 0x0100, new UIntPtr(key), IntPtr.Zero);
-		System.Threading.Thread.Sleep(150);
+		keybd_event(key, 0, 0, UIntPtr.Zero);
+		keybd_event(key, 0, 2, UIntPtr.Zero);
 		for (var index = modifiers.Length - 1; index >= 0; --index)
 		{
 			keybd_event(modifiers[index], 0, 2, UIntPtr.Zero);
 		}
-		return posted;
+		System.Threading.Thread.Sleep(150);
+		return true;
 	}
 
-	[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
-	private static extern IntPtr SendMessageBuffer(IntPtr window, uint message, UIntPtr wParam, StringBuilder lParam);
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern IntPtr VirtualAllocEx(IntPtr process, IntPtr address, UIntPtr size, uint allocationType, uint protect);
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool VirtualFreeEx(IntPtr process, IntPtr address, UIntPtr size, uint freeType);
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, UIntPtr size, out UIntPtr read);
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool CloseHandle(IntPtr handle);
 
 	// 상태 바는 창 텍스트가 아니라 파트 텍스트를 갖는다. SB_GETTEXTLENGTHW(0x040C) 가
 	// 하위 워드에 길이를 주고 SB_GETTEXTW(0x040D) 가 그 버퍼를 채운다.
+	// SB_GETTEXTW 는 WM_GETTEXT 와 달리 OS 가 프로세스 경계를 마샬링하지 않는다 - 이쪽 버퍼
+	// 주소를 그대로 보내면 상태 바(comctl32)가 대상 프로세스 안에서 남의 주소에 쓰다 앱을
+	// 죽인다(실측 2026-08-21: 0xC000041D, D-04 1차). 대상 프로세스 안에 버퍼를 잡아 주고 읽어 온다.
 	public static string StatusPartText(IntPtr status, int part)
 	{
 		var length = SendMessage(status, 0x040C, new UIntPtr((uint)part), IntPtr.Zero).ToInt32() & 0xFFFF;
 		if (length <= 0) return String.Empty;
-		var buffer = new StringBuilder(length + 1);
-		SendMessageBuffer(status, 0x040D, new UIntPtr((uint)part), buffer);
-		return buffer.ToString();
+		uint processId;
+		GetWindowThreadProcessId(status, out processId);
+		var process = OpenProcess(0x0008 | 0x0010 | 0x0020, false, processId); // VM_OPERATION | VM_READ | VM_WRITE
+		if (process == IntPtr.Zero) return String.Empty;
+		try
+		{
+			var bytes = new UIntPtr((uint)((length + 1) * 2));
+			var remote = VirtualAllocEx(process, IntPtr.Zero, bytes, 0x1000 | 0x2000, 0x04); // MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
+			if (remote == IntPtr.Zero) return String.Empty;
+			try
+			{
+				SendMessage(status, 0x040D, new UIntPtr((uint)part), remote);
+				var buffer = new byte[(length + 1) * 2];
+				UIntPtr read;
+				if (!ReadProcessMemory(process, remote, buffer, bytes, out read)) return String.Empty;
+				var text = Encoding.Unicode.GetString(buffer, 0, (int)read.ToUInt32());
+				var terminator = text.IndexOf('\0');
+				return terminator >= 0 ? text.Substring(0, terminator) : text;
+			}
+			finally { VirtualFreeEx(process, remote, UIntPtr.Zero, 0x8000); } // MEM_RELEASE
+		}
+		finally { CloseHandle(process); }
 	}
 }
 '@
@@ -603,7 +683,8 @@ try {
     $predicates.PrimaryStartupOneWindow = $true
     $predicates.ActualHwndPerMonitorV2 = [NoteExWindowProbe]::IsPerMonitorV2($windows[0].Handle)
     $predicates.ViewFirstResetGeometry = [NoteExWindowProbe]::FirstViewCommand($windows[0].Handle) -eq 106
-    $predicates.PermanentSplitterHosts = [NoteExWindowProbe]::PaneHostsArePermanentAndOrdered($windows[0].Handle)
+    # 창이 열거된 직후는 첫 레이아웃 전이라 pane 폭이 0 일 수 있다 - 정착까지 기다려 관측한다.
+    $predicates.PermanentSplitterHosts = Wait-Condition { [NoteExWindowProbe]::PaneHostsArePermanentAndOrdered($windows[0].Handle) }
     if (-not [NoteExWindowProbe]::PostMessage($windows[0].Handle, 0x0111, [UIntPtr]106, [IntPtr]::Zero)) {
         throw 'Failed to post IDM_RESET_GEOMETRY'
     }
@@ -675,14 +756,17 @@ try {
     $ownedProcesses.Add($restartTwo)
     $windows = Get-WindowSet $restartTwo 2
     $predicates.RestartAfterFullQuitRestoresTwo = $true
-    $independentGeometry = $true
-    foreach ($window in $windows) {
-        if (-not $savedGeometry.ContainsKey($window.Title) -or
-            -not (Test-RectNear ([NoteExWindowProbe]::Frame($window.Handle)) $savedGeometry[$window.Title])) {
-            $independentGeometry = $false
+    # 복원 위치는 기동 직후 몇 프레임 뒤에 정착한다 - 두 창 전부 저장 위치 근방에 놓일 때까지 기다린다.
+    $predicates.IndependentGeometryRestored = Wait-Condition {
+        $script:windows = @([NoteExWindowProbe]::MainWindows($restartTwo.Id))
+        $ok = @($script:windows).Count -eq 2
+        foreach ($window in $script:windows) {
+            if (-not $savedGeometry.ContainsKey($window.Title) -or
+                -not (Test-RectNear ([NoteExWindowProbe]::Frame($window.Handle)) $savedGeometry[$window.Title])) { $ok = $false }
         }
+        return $ok
     }
-    $predicates.IndependentGeometryRestored = $independentGeometry
+    $windows = @([NoteExWindowProbe]::MainWindows($restartTwo.Id))
 
     $offscreenFrame = [NoteExWindowProbe]::Frame($windows[0].Handle)
     if (-not [NoteExWindowProbe]::Move($windows[0].Handle, 100000, 100000,
@@ -756,7 +840,12 @@ try {
     $findInput = [NoteExWindowProbe]::ChildById($shellWindow, 2103)    # IDC_DOCUMENT_FIND
     $replaceInput = [NoteExWindowProbe]::ChildById($shellWindow, 2104) # IDC_DOCUMENT_REPLACE
     $historyList = [NoteExWindowProbe]::ChildById($shellWindow, 2105)  # IDC_DOCUMENT_HISTORY
-    $predicates.ActualPageChildWindows =
+    # 자식 HWND 생성·가시화가 창 열거보다 늦을 수 있다 - 정착까지 기다려 관측한다.
+    $predicates.ActualPageChildWindows = Wait-Condition {
+        $status = [NoteExWindowProbe]::ChildById($shellWindow, 2106); $cardList = [NoteExWindowProbe]::ChildById($shellWindow, 2101)
+        $editor = [NoteExWindowProbe]::ChildById($shellWindow, 2102); $findInput = [NoteExWindowProbe]::ChildById($shellWindow, 2103)
+        $replaceInput = [NoteExWindowProbe]::ChildById($shellWindow, 2104); $historyList = [NoteExWindowProbe]::ChildById($shellWindow, 2105)
+        return (
         $status -ne [IntPtr]::Zero -and $cardList -ne [IntPtr]::Zero -and
         $editor -ne [IntPtr]::Zero -and $historyList -ne [IntPtr]::Zero -and
         $findInput -ne [IntPtr]::Zero -and $replaceInput -ne [IntPtr]::Zero -and
@@ -767,7 +856,10 @@ try {
         [NoteExWindowProbe]::IsWindowVisible($status) -and
         [NoteExWindowProbe]::IsWindowVisible($cardList) -and
         [NoteExWindowProbe]::IsWindowVisible($editor) -and
-        -not [NoteExWindowProbe]::IsWindowVisible($historyList)
+        -not [NoteExWindowProbe]::IsWindowVisible($historyList)) }
+    $status = [NoteExWindowProbe]::ChildById($shellWindow, 2106); $cardList = [NoteExWindowProbe]::ChildById($shellWindow, 2101)
+    $editor = [NoteExWindowProbe]::ChildById($shellWindow, 2102); $findInput = [NoteExWindowProbe]::ChildById($shellWindow, 2103)
+    $replaceInput = [NoteExWindowProbe]::ChildById($shellWindow, 2104); $historyList = [NoteExWindowProbe]::ChildById($shellWindow, 2105)
 
     # G4-2: 첫 붙여넣기가 DB 카드 하나를 만들고 paste 출처와 편집기 연결을 남긴다.
     # 포커스는 GUI 스레드 큐에 하나뿐이고 두 창이 같은 스레드에 산다. 이후 관측이 이 창을
@@ -951,22 +1043,28 @@ try {
     $restarted = Start-NoteEx $database
     $ownedProcesses.Add($restarted)
     $windows = Get-WindowSet $restarted 2
+    # 창 열거 직후 제목은 생성 중 기본값일 수 있다(OnCreate 말미 update_title_) - 제목이 정착할 때까지 기다린다.
+    [void](Wait-Condition { $script:windows = @([NoteExWindowProbe]::MainWindows($restarted.Id)); @($script:windows | Where-Object { $_.Title -ceq $shellTitle }).Count -eq 1 })
+    $windows = @([NoteExWindowProbe]::MainWindows($restarted.Id))
     $restoredMatches = @($windows | Where-Object { $_.Title -ceq $shellTitle })
     if ($restoredMatches.Count -eq 1) {
         $restoredWindow = $restoredMatches[0].Handle
         $restoredEditor = [NoteExWindowProbe]::ChildById($restoredWindow, 2102)
         $restoredList = [NoteExWindowProbe]::ChildById($restoredWindow, 2101)
-        $restoredLeftFrame = [NoteExWindowProbe]::Frame(
-            [NoteExWindowProbe]::ChildById($restoredWindow, 2001))
-        $restoredLeftWidth = $restoredLeftFrame.Right - $restoredLeftFrame.Left
-        $predicates.RestartRestoresPageUiState =
-            $draggedWidth -ge ($leftWidthBeforeDrag + 16) -and
-            $selectionBefore -eq ((5 -shl 16) -bor 5) -and
-            (ConvertTo-LfText ([NoteExWindowProbe]::WindowTextValue($restoredEditor))) -ceq $savedBody -and
-            (Send-ProbeMessage $restoredEditor 0x00B0) -eq $selectionBefore -and
-            (Send-ProbeMessage $restoredList 0x018B) -eq $listCountBefore -and
-            (Send-ProbeMessage $restoredList 0x0188) -eq $listSelectionBefore -and
-            [Math]::Abs($restoredLeftWidth - $draggedWidth) -le 4
+        # 복원 직후에는 레이아웃 전이라 pane 폭이 0 으로 읽힐 수 있다 - 정착까지 기다려 관측한다.
+        $predicates.RestartRestoresPageUiState = Wait-Condition {
+            $restoredLeftFrame = [NoteExWindowProbe]::Frame(
+                [NoteExWindowProbe]::ChildById($restoredWindow, 2001))
+            $script:restoredLeftWidth = $restoredLeftFrame.Right - $restoredLeftFrame.Left
+            return (
+                $draggedWidth -ge ($leftWidthBeforeDrag + 16) -and
+                $selectionBefore -eq ((5 -shl 16) -bor 5) -and
+                (ConvertTo-LfText ([NoteExWindowProbe]::WindowTextValue($restoredEditor))) -ceq $savedBody -and
+                (Send-ProbeMessage $restoredEditor 0x00B0) -eq $selectionBefore -and
+                (Send-ProbeMessage $restoredList 0x018B) -eq $listCountBefore -and
+                (Send-ProbeMessage $restoredList 0x0188) -eq $listSelectionBefore -and
+                [Math]::Abs($script:restoredLeftWidth - $draggedWidth) -le 4) }
+        $restoredLeftWidth = $script:restoredLeftWidth
     }
     if (-not [NoteExWindowProbe]::PostMessage($windows[0].Handle, 0x0111, [UIntPtr]105, [IntPtr]::Zero)) {
         throw 'Failed to post IDM_EXIT after the shell spine restart'

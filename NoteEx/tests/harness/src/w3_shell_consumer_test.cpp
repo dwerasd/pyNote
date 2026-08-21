@@ -587,3 +587,31 @@ TEST_CASE("CAP-FI-035 persisted edit draft on the saved editor card defers edito
 	REQUIRE(Drafts.size() == 1);
 	REQUIRE(Drafts.front().sId == "later-switch-draft");
 }
+
+// 대응 원본: main_window.py:421~431 closeEvent 계약 - can_leave_open_pages 승인 뒤 persist_open_page_ui_states.
+// 승인(CanLeave)은 깨끗한 세션을 풀지 않아야 영속이 편집기 카드를 기록하고, 해제까지 하는 Back 경로
+// (RequestLeave)와 구분된다. 실측 2026-08-21 D-04: 승인 단계가 세션을 풀어 재시작 복원이 편집기를 잃었다.
+TEST_CASE("CAP-FI-035 leave approval keeps the clean session so persisted state records the editor card",
+	"[W3-shell-spine][WTL-CAP-FI-035]")
+{
+	C_PAGE_FIXTURE Fixture;
+	auto& Page = Fixture.Page();
+	Fixture.Paste(L"approval body");
+	REQUIRE(Page.Save());
+	REQUIRE(Page.HasSession());
+	REQUIRE_FALSE(Page.HasDirtySession());
+	REQUIRE(Page.CanLeave() == app::E_LEAVE_RESULT::ApprovedClean);
+	REQUIRE(Page.HasSession());
+	REQUIRE(window_text(Page.EditorHwnd()) == L"approval body");
+	REQUIRE(Page.PersistState(std::nullopt));
+	app::C_WORKSPACE_STATE_STORE Store(
+		Fixture.Database(), Fixture.Repositories(), C_PAGE_FIXTURE::WorkspaceId);
+	app::S_DOCUMENT_UI_STATE State;
+	REQUIRE(Store.LoadDocumentUiState(C_PAGE_FIXTURE::DocumentId, &State) == storage::E_REPO_RESULT::Ok);
+	REQUIRE(State.sEditorCardId == Fixture.Card().sId);
+	// Back 경로는 종전대로 해제까지 한다.
+	REQUIRE(Page.RequestLeave() == app::E_LEAVE_RESULT::ApprovedClean);
+	REQUIRE_FALSE(Page.HasSession());
+	REQUIRE(window_text(Page.EditorHwnd()).empty());
+	REQUIRE(::GetFocus() == Page.CardListHwnd());
+}
