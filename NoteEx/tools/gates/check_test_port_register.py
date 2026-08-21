@@ -384,7 +384,10 @@ def _source_test_names(native_root: Path) -> set[str]:
 def _listed_test_names(native_exe: Path) -> set[str]:
     try:
         result = subprocess.run(
-            [str(native_exe.resolve()), "--list-tests"],
+            # 기본 출력은 긴 이름을 80열에서 줄바꿈해 첫 줄만 이름처럼 보인다(2026-08-21 실측: 79자 초과
+            # 케이스 9행이 "존재하지 않는 신규 ID" 오탐). --verbosity quiet 는 한 줄에 이름 하나를 줄바꿈
+            # 없이 낸다.
+            [str(native_exe.resolve()), "--list-tests", "--verbosity", "quiet"],
             cwd=native_exe.resolve().parents[2],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -400,9 +403,9 @@ def _listed_test_names(native_exe: Path) -> set[str]:
     except UnicodeDecodeError as error:
         raise EnvironmentError(f"native registry is not valid CP949: {error}") from error
     names = {
-        line[2:]
+        line.strip()
         for line in decoded.replace("\r\n", "\n").replace("\r", "\n").splitlines()
-        if line.startswith("  ") and not line.startswith("    ") and line[2:].strip()
+        if line.strip()
     }
     if not names:
         raise EnvironmentError("native registry returned zero test IDs")
