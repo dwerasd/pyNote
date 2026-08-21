@@ -1,9 +1,18 @@
-#include <catch_amalgamated.hpp>
+﻿#include <catch_amalgamated.hpp>
 
 #include "CDocumentListShell.h"
 #include "CDocumentPage.h"
 #include "CSearchDialog.h"
 #include "Resource.h"
+#include "pynote/harness/win32_harness.h"
+
+// windows.h 의 CreateEvent 매크로가 repositories.h 의 멤버 이름을 바꾸기 전에 걷는다 -
+// 다른 TU(CDocumentPage.cpp·save_coordinator_core_test.cpp)와 같은 순서 계약이어야
+// 같은 바이너리 안에서 멤버 이름이 갈리지 않는다.
+#ifdef CreateEvent
+#undef CreateEvent
+#endif
+
 #include "pynote/core/application/card_service.h"
 #include "pynote/core/application/draft_coordinator.h"
 #include "pynote/core/application/save_coordinator.h"
@@ -11,11 +20,6 @@
 #include "pynote/core/domain/paragraph_parser.h"
 #include "pynote/core/storage/migration_runner.h"
 #include "pynote/core/storage/repositories.h"
-#include "pynote/harness/win32_harness.h"
-
-#ifdef CreateEvent
-#undef CreateEvent
-#endif
 
 #include <atomic>
 #include <cstring>
@@ -92,6 +96,8 @@ namespace
 			m_Page.reset();
 			this->create_page_();
 		}
+
+		pynote::harness::TestWindow& Parent() { return(m_Parent); }
 
 		void Type(wchar_t _ch)
 		{
@@ -238,13 +244,36 @@ TEST_CASE("PLAN-W3-0025 actual document page creates opens saves and navigates",
 	REQUIRE(Fixture.Card().sBody == "a");
 	Fixture.Type(L'b');
 	REQUIRE(Page.HasDirtySession());
-	::keybd_event(VK_CONTROL, 0, 0, 0);
+	// GetKeyState 는 스레드 키 상태를 본다 - keybd_event(전역 입력 큐 주입)는 펌프
+	// 전까지 반영이 보장되지 않고 실제 키보드 상태도 오염한다. SetKeyboardState 로
+	// 호출 스레드의 Ctrl 상태를 결정적으로 만든다.
+	BYTE PreviousKeys[256]{};
+	REQUIRE(::GetKeyboardState(PreviousKeys) != FALSE);
+	BYTE ControlKeys[256]{};
+	std::memcpy(ControlKeys, PreviousKeys, sizeof(ControlKeys));
+	ControlKeys[VK_CONTROL] |= 0x80;
+	REQUIRE(::SetKeyboardState(ControlKeys) != FALSE);
 	MSG Message{ Page.EditorHwnd(), WM_KEYDOWN, VK_RETURN, 1, 0, { 0, 0 } };
-	REQUIRE(Page.PreTranslateMessage(&Message));
-	::keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+	const bool bTranslated = Page.PreTranslateMessage(&Message);
+	REQUIRE(::SetKeyboardState(PreviousKeys) != FALSE);
+	REQUIRE(bTranslated);
 	Fixture.Type(L'c');
-	REQUIRE(window_text(Page.EditorHwnd()).find(L'\n') != std::wstring::npos ||
-		window_text(Page.EditorHwnd()).find(L'\r') != std::wstring::npos);
+	// 계약은 "Ctrl+Enter = LF 하나 삽입"이다. 편집기 내부 표현(CR)과 무관하게
+	// CR/CRLF/LF 를 접어 단락 구분이 정확히 하나임을 센다.
+	{
+		const std::wstring sEditorText = window_text(Page.EditorHwnd());
+		std::size_t nBreaks = 0;
+		for (std::size_t nIndex = 0; nIndex < sEditorText.size(); ++nIndex)
+		{
+			if (sEditorText[nIndex] == L'\r')
+			{
+				if (nIndex + 1 < sEditorText.size() && sEditorText[nIndex + 1] == L'\n') { ++nIndex; }
+				++nBreaks;
+			}
+			else if (sEditorText[nIndex] == L'\n') { ++nBreaks; }
+		}
+		REQUIRE(nBreaks == 1);
+	}
 	REQUIRE(Page.Save());
 	REQUIRE_FALSE(Page.HasDirtySession());
 	REQUIRE(Fixture.Card().sBody == "ab\nc");
@@ -298,6 +327,34 @@ TEST_CASE("PLAN-W3-0026 runtime menu accelerators and modeless search are wired"
 		reinterpret_cast<WPARAM>(&nStart), reinterpret_cast<LPARAM>(&nEnd));
 	REQUIRE(nStart == 0);
 	REQUIRE(nEnd == 3);
+	// 라우팅 계약: 프레임 소속 메시지만 대상이고, 사전 번역이 액셀러레이터보다 먼저다.
+	{
+		TestWindow Frame(pynote::harness::TestWindowOptions{ L"route frame", 200, 100, true });
+		int nCommands = 0;
+		Frame.set_handler([&](UINT _uMessage, WPARAM _wParam, LPARAM, LRESULT& _nResult) {
+			if (_uMessage != WM_COMMAND || LOWORD(_wParam) != IDM_BACK) { return(false); }
+			++nCommands;
+			_nResult = 0;
+			return(true);
+		});
+		MSG Escape{ Frame.hwnd(), WM_KEYDOWN, VK_ESCAPE, 1, 0, { 0, 0 } };
+		int nPreTranslated = 0;
+		REQUIRE(shell::RouteFrameMessage(&Escape, Frame.hwnd(),
+			[&](MSG*) { ++nPreTranslated; return(true); }, hAccelerator));
+		REQUIRE(nPreTranslated == 1);
+		REQUIRE(nCommands == 0);
+		REQUIRE(shell::RouteFrameMessage(&Escape, Frame.hwnd(),
+			[&](MSG*) { ++nPreTranslated; return(false); }, hAccelerator));
+		REQUIRE(nPreTranslated == 2);
+		REQUIRE(nCommands == 1);
+		// 소유 모델리스 셸(검색 창) 메시지는 어느 층에도 닿지 않는다.
+		MSG Outside{ Search.QueryHwnd(), WM_KEYDOWN, VK_ESCAPE, 1, 0, { 0, 0 } };
+		REQUIRE_FALSE(shell::RouteFrameMessage(&Outside, Frame.hwnd(),
+			[&](MSG*) { ++nPreTranslated; return(true); }, hAccelerator));
+		REQUIRE(nPreTranslated == 2);
+		REQUIRE(nCommands == 1);
+		Frame.set_handler({});
+	}
 	Search.Hide();
 	REQUIRE_FALSE(Search.IsVisible());
 	Search.Destroy();
@@ -373,8 +430,45 @@ TEST_CASE("CAP-FI-026 both Back paths keep rejected dirty editor",
 	REQUIRE(Page.RequestLeave() == app::E_LEAVE_RESULT::Denied);
 	REQUIRE(Page.HasDirtySession());
 	REQUIRE(::GetFocus() == Page.EditorHwnd());
+	// Back 의 정본 경로는 액셀러레이터(IDM_BACK)다 - 페이지가 Esc/Alt+Left 를 소비하면
+	// 거부된 leave 가 액셀러레이터로 흘러 프롬프트가 두 번 뜬다. 페이지 미소비를 먼저
+	// 고정하고, 두 Back 키 전부 실제 테이블로 IDM_BACK 에 결속됨을 구동으로 확인한다.
 	MSG Escape{ Page.EditorHwnd(), WM_KEYDOWN, VK_ESCAPE, 1, 0, { 0, 0 } };
 	REQUIRE_FALSE(Page.PreTranslateMessage(&Escape));
+	MSG AltLeft{ Page.EditorHwnd(), WM_SYSKEYDOWN, VK_LEFT, 0x20000001, 0, { 0, 0 } };
+	REQUIRE_FALSE(Page.PreTranslateMessage(&AltLeft));
+	// 핸들러 탈출 예외는 하네스가 삼키므로(win32_harness 계약) 결과를 기록해 밖에서 단언한다.
+	std::vector<app::E_LEAVE_RESULT> BackResults;
+	Fixture.Parent().set_handler([&](UINT _uMessage, WPARAM _wParam, LPARAM, LRESULT& _nResult) {
+		if (_uMessage != WM_COMMAND || LOWORD(_wParam) != IDM_BACK) { return(false); }
+		BackResults.push_back(Page.RequestLeave());
+		_nResult = 0;
+		return(true);
+	});
+	const auto BackTable = shell::RuntimeAccelerators();
+	HACCEL hBackAccelerator = ::CreateAcceleratorTableW(
+		const_cast<LPACCEL>(BackTable.data()), static_cast<int>(BackTable.size()));
+	REQUIRE(hBackAccelerator != nullptr);
+	MSG EscapeKey{ Fixture.Parent().hwnd(), WM_KEYDOWN, VK_ESCAPE, 1, 0, { 0, 0 } };
+	REQUIRE(::TranslateAcceleratorW(Fixture.Parent().hwnd(), hBackAccelerator, &EscapeKey));
+	// FALT 매칭은 번역 시점의 스레드 키 상태를 본다 - SetKeyboardState 로 결정화한다.
+	BYTE PreviousKeys[256]{};
+	REQUIRE(::GetKeyboardState(PreviousKeys) != FALSE);
+	BYTE MenuKeys[256]{};
+	std::memcpy(MenuKeys, PreviousKeys, sizeof(MenuKeys));
+	MenuKeys[VK_MENU] |= 0x80;
+	REQUIRE(::SetKeyboardState(MenuKeys) != FALSE);
+	MSG AltLeftKey{ Fixture.Parent().hwnd(), WM_SYSKEYDOWN, VK_LEFT, 0x20000001, 0, { 0, 0 } };
+	const BOOL bAltLeftTranslated =
+		::TranslateAcceleratorW(Fixture.Parent().hwnd(), hBackAccelerator, &AltLeftKey);
+	REQUIRE(::SetKeyboardState(PreviousKeys) != FALSE);
+	REQUIRE(bAltLeftTranslated);
+	REQUIRE(BackResults ==
+		std::vector<app::E_LEAVE_RESULT>{ app::E_LEAVE_RESULT::Denied, app::E_LEAVE_RESULT::Denied });
+	::DestroyAcceleratorTable(hBackAccelerator);
+	Fixture.Parent().set_handler({});
+	REQUIRE(Page.HasDirtySession());
+	::SetFocus(Page.EditorHwnd());
 	REQUIRE(::GetFocus() == Page.EditorHwnd());
 	Fixture.LeaveChoice = C_DOCUMENT_PAGE::E_LEAVE_CHOICE::Save;
 	REQUIRE(Page.RequestLeave() == app::E_LEAVE_RESULT::ApprovedAfterSave);

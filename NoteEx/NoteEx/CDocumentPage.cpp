@@ -33,10 +33,10 @@ namespace
 
 	std::wstring wide(const std::string& _sValue)
 	{
-		if (_sValue.empty()) { return({}); }
+		if (_sValue.empty()) { return(std::wstring{}); }
 		const int nSize = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
 			_sValue.data(), static_cast<int>(_sValue.size()), nullptr, 0);
-		if (nSize <= 0) { return({}); }
+		if (nSize <= 0) { return(std::wstring{}); }
 		std::wstring Result(static_cast<std::size_t>(nSize), L'\0');
 		return(::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, _sValue.data(),
 			static_cast<int>(_sValue.size()), Result.data(), nSize) == nSize ? Result : std::wstring{});
@@ -48,17 +48,19 @@ namespace
 		Normalized.reserve(_sValue.size());
 		for (std::size_t nIndex = 0; nIndex < _sValue.size(); ++nIndex)
 		{
-			if (_sValue[nIndex] == L'\r' && nIndex + 1 < _sValue.size() && _sValue[nIndex + 1] == L'\n')
+			// RichEdit(WM_GETTEXT, GT_DEFAULT 등가)는 단락 구분을 단독 CR 로 돌려준다 -
+			// P1 프로브 normalize_lf 와 같은 규칙으로 CR/CRLF 를 전부 LF 로 접는다.
+			if (_sValue[nIndex] == L'\r')
 			{
+				if (nIndex + 1 < _sValue.size() && _sValue[nIndex + 1] == L'\n') { ++nIndex; }
 				Normalized.push_back(L'\n');
-				++nIndex;
 			}
 			else { Normalized.push_back(_sValue[nIndex]); }
 		}
-		if (Normalized.empty()) { return({}); }
+		if (Normalized.empty()) { return(std::string{}); }
 		const int nSize = ::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
 			Normalized.data(), static_cast<int>(Normalized.size()), nullptr, 0, nullptr, nullptr);
-		if (nSize <= 0) { return({}); }
+		if (nSize <= 0) { return(std::string{}); }
 		std::string Result(static_cast<std::size_t>(nSize), '\0');
 		return(::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Normalized.data(),
 			static_cast<int>(Normalized.size()), Result.data(), nSize, nullptr, nullptr) == nSize ?
@@ -344,15 +346,9 @@ bool C_DOCUMENT_PAGE::PreTranslateMessage(MSG* _pMessage)
 		::SendMessageW(m_pState->hEditor, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"\n"));
 		return(m_pState->synchronize_editor(domain::E_CAPTURE_OPERATION_SOURCE::Typing));
 	}
-	if (_pMessage->message == WM_KEYDOWN && _pMessage->wParam == VK_ESCAPE)
-	{
-		return(this->RequestLeave() != app::E_LEAVE_RESULT::Denied);
-	}
-	if (_pMessage->message == WM_SYSKEYDOWN && _pMessage->wParam == VK_LEFT &&
-		(::GetKeyState(VK_MENU) & 0x8000))
-	{
-		return(this->RequestLeave() != app::E_LEAVE_RESULT::Denied);
-	}
+	// Esc/Alt+Left 는 여기서 처리하지 않는다 - 원본(main_window.py:855~860 back_action)이
+	// 창 수준 단축키라 액셀러레이터(IDM_BACK -> OnBack -> RequestLeave) 단일 경로가 정본이다.
+	// 여기서도 처리하면 거부된 leave 가 액셀러레이터로 흘러 프롬프트가 두 번 뜬다.
 	return(false);
 }
 

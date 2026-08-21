@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$Executable
 )
@@ -288,6 +288,107 @@ public static class NoteExWindowProbe
 		return Math.Max(frame.Left, work.Left) < Math.Min(frame.Right, work.Right) &&
 			Math.Max(frame.Top, work.Top) < Math.Min(frame.Bottom, work.Bottom);
 	}
+
+	// 아래는 W3 셸 스파인(G4) 확장 전용 프로브다. 선행 24 술어가 쓰는 멤버는 손대지 않는다.
+	[StructLayout(LayoutKind.Sequential)]
+	private struct GUITHREADINFO
+	{
+		public int Size;
+		public int Flags;
+		public IntPtr Active;
+		public IntPtr Focus;
+		public IntPtr Capture;
+		public IntPtr MenuOwner;
+		public IntPtr MoveSize;
+		public IntPtr Caret;
+		public RECT CaretFrame;
+	}
+
+	[DllImport("user32.dll")]
+	private static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO information);
+	[DllImport("user32.dll")]
+	private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+	public static IntPtr Send(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam)
+	{
+		return SendMessage(window, message, wParam, lParam);
+	}
+
+	public static bool Activate(IntPtr window)
+	{
+		return SetForegroundWindow(window);
+	}
+
+	public static string ClassNameOf(IntPtr window)
+	{
+		var className = new StringBuilder(256);
+		GetClassName(window, className, className.Capacity);
+		return className.ToString();
+	}
+
+	public static IntPtr MenuOf(IntPtr window)
+	{
+		return GetMenu(window);
+	}
+
+	// 포커스는 스레드 큐 상태라 다른 프로세스에서는 GetGUIThreadInfo 로만 관측된다.
+	public static IntPtr FocusedWindow(IntPtr window)
+	{
+		uint processId;
+		var thread = GetWindowThreadProcessId(window, out processId);
+		var information = new GUITHREADINFO();
+		information.Size = Marshal.SizeOf(typeof(GUITHREADINFO));
+		return GetGUIThreadInfo(thread, ref information) ? information.Focus : IntPtr.Zero;
+	}
+
+	public static IntPtr ChildByClass(IntPtr window, string expectedClass)
+	{
+		IntPtr result = IntPtr.Zero;
+		EnumChildWindows(window, (child, parameter) =>
+		{
+			var className = new StringBuilder(256);
+			GetClassName(child, className, className.Capacity);
+			if (!String.Equals(className.ToString(), expectedClass, StringComparison.Ordinal)) return true;
+			result = child;
+			return false;
+		}, IntPtr.Zero);
+		return result;
+	}
+
+	// 창마다 자기 모달리스 셸을 하나씩 소유하므로 클래스만으로는 어느 창 것인지 가려지지 않는다.
+	public static IntPtr OwnedWindowByClass(int processId, IntPtr owner, string expectedClass)
+	{
+		IntPtr result = IntPtr.Zero;
+		EnumWindows((window, parameter) =>
+		{
+			uint current;
+			GetWindowThreadProcessId(window, out current);
+			if (current != processId) return true;
+			var className = new StringBuilder(256);
+			GetClassName(window, className, className.Capacity);
+			if (!String.Equals(className.ToString(), expectedClass, StringComparison.Ordinal)) return true;
+			if (GetWindow(window, 4) != owner) return true;
+			result = window;
+			return false;
+		}, IntPtr.Zero);
+		return result;
+	}
+
+	// SendChord 와 같은 규약이되 수식 키가 여러 개이고 게시 대상 창을 따로 지정한다.
+	// Ctrl+Enter 는 편집기 HWND 로 가야 페이지 pre-translation 이 받고, 가속기는 활성 창
+	// 큐의 GetKeyState 로 수식 키를 읽으므로 활성화가 먼저다.
+	public static bool SendChordEx(IntPtr activate, IntPtr target, byte[] modifiers, byte key)
+	{
+		SetForegroundWindow(activate);
+		foreach (var modifier in modifiers) keybd_event(modifier, 0, 0, UIntPtr.Zero);
+		var posted = PostMessage(target, 0x0100, new UIntPtr(key), IntPtr.Zero);
+		System.Threading.Thread.Sleep(150);
+		for (var index = modifiers.Length - 1; index >= 0; --index)
+		{
+			keybd_event(modifiers[index], 0, 2, UIntPtr.Zero);
+		}
+		return posted;
+	}
 }
 '@
 
@@ -347,6 +448,72 @@ function Test-RectNear($Actual, $Expected, [int]$Tolerance = 4) {
         [Math]::Abs($Actual.Bottom - $Expected.Bottom) -le $Tolerance
 }
 
+# 아래 보조 함수는 W3 셸 스파인(G4) 확장 전용이다. 선행 24 술어의 경로는 건드리지 않는다.
+
+# UI 전이 대기는 기존 폴링(50ms 간격 + 마감 시각)과 같은 모양을 쓴다.
+function Wait-Condition([scriptblock]$Condition, [int]$TimeoutSeconds = 10) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        if (& $Condition) { return $true }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
+function Send-ProbeMessage([IntPtr]$Window, [int]$Message, [int]$WParam = 0, [int]$LParam = 0) {
+    return [NoteExWindowProbe]::Send($Window, [uint32]$Message, [UIntPtr]$WParam, [IntPtr]$LParam).ToInt32()
+}
+
+# RichEdit 은 단락 구분을 CR/CRLF 로 돌려준다. 제품 CDocumentPage 의 utf8() 과 같은 규칙으로
+# 접어서 창 표시 값을 비교한다 - 저장 본문의 LF 계약은 DB 바이트 술어가 따로 강제한다.
+function ConvertTo-LfText([string]$Value) {
+    return ($Value -replace "`r`n", "`n" -replace "`r", "`n")
+}
+
+# 살아 있는 제품이 DB 를 쓰기로 열고 있어 Get-FileHash/Copy-Item 의 FileShare.Read 로는
+# 공유 위반이 난다. FileShare.ReadWrite 로 스냅샷만 뜨고 해시·바이트 검색은 사본에서 한다.
+# -shm 은 행 데이터를 담지 않으므로 대상이 아니다.
+function Copy-LiveDatabase([string]$DatabasePath, [string]$ScanRoot) {
+    $stamp = [guid]::NewGuid().ToString('N')
+    $copies = New-Object System.Collections.Generic.List[object]
+    foreach ($path in @($DatabasePath, "$DatabasePath-wal")) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $name = Split-Path -Leaf $path
+        $copy = Join-Path $ScanRoot "$name-$stamp"
+        $source = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        try {
+            $target = [IO.File]::Create($copy)
+            try { $source.CopyTo($target) } finally { $target.Dispose() }
+        } finally { $source.Dispose() }
+        $copies.Add([PSCustomObject]@{ Name = $name; Path = $copy })
+    }
+    return $copies.ToArray()
+}
+
+function Get-LiveDatabaseFingerprint($Copies) {
+    $result = [ordered]@{}
+    foreach ($copy in $Copies) {
+        $file = Get-Item -LiteralPath $copy.Path
+        $result[$copy.Name] = "$($file.Length):$((Get-FileHash -LiteralPath $copy.Path -Algorithm SHA256).Hash)"
+    }
+    return ($result | ConvertTo-Json -Compress)
+}
+
+# sqlite3 CLI 도 System.Data.SQLite 도 이 호스트에 보장되지 않는다. SQLite 는 TEXT 를 페이지
+# 이미지에 무압축으로 싣고 레코드 값은 열 순서대로 붙으므로, cards 의 source||body 인접
+# 바이트열을 사본에서 찾으면 카드 행의 출처와 본문을 한 번에 확인할 수 있다(draft_text 같은
+# 다른 열은 이 접두사를 갖지 않는다). 1 바이트 = 1 문자인 ISO-8859-1 로 디코드해 Ordinal
+# 검색하므로 바이트 비교와 동치다.
+function Test-CopiesContainUtf8($Copies, [string]$Needle) {
+    $latin = [Text.Encoding]::GetEncoding(28591)
+    $pattern = $latin.GetString([Text.Encoding]::UTF8.GetBytes($Needle))
+    foreach ($copy in $Copies) {
+        $image = $latin.GetString([IO.File]::ReadAllBytes($copy.Path))
+        if ($image.IndexOf($pattern, [StringComparison]::Ordinal) -ge 0) { return $true }
+    }
+    return $false
+}
+
 $predicates = [ordered]@{
     PrimaryStartupOneWindow = $false
     SecondaryExitZero = $false
@@ -372,6 +539,16 @@ $predicates = [ordered]@{
     IndependentGeometryRestored = $false
     OffscreenGeometryCorrected = $false
     PerWindowGeometryKeys = $false
+    ActualPageChildWindows = $false
+    FirstPasteCreatesConnectedCard = $false
+    ListEnterOpensStoredCard = $false
+    CtrlEnterLfSavesExactDbBody = $false
+    FindReplaceVisibilityAndFocus = $false
+    HistoryToCardListModeAndFocus = $false
+    RuntimeMenuCommandsAndAcceleratorDispatch = $false
+    ModelessSearchQueryFocus = $false
+    FocusModeHidesAndRestoresShell = $false
+    RestartRestoresPageUiState = $false
 }
 
 $ownedProcesses = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
@@ -384,6 +561,8 @@ if (-not $temporaryRoot.StartsWith($temporaryParent, [StringComparison]::Ordinal
 }
 
 $savedLocalAppData = $env:LOCALAPPDATA
+$savedClipboardText = $null
+$clipboardCaptured = $false
 $database = Join-Path $temporaryRoot 'db\primary.sqlite3'
 $secondaryDatabase = Join-Path $temporaryRoot 'db\secondary.sqlite3'
 $defaultDatabase = Join-Path $env:APPDATA 'pyNote\pyNote\pynote.sqlite3'
@@ -516,6 +695,236 @@ try {
     }
     Wait-ProcessExit $reacquired
 
+    # --- W3 셸 스파인(G4 확장) ---
+    # 선행 24 술어의 순서와 의미를 흔들지 않도록 마지막 재획득 종료 뒤에 덧붙인다. G4 10번
+    # 항목(기본 DB/레지스트리/프로세스/임시 루트·재획득 불변식)은 이 구간 뒤에서 그대로
+    # 평가되는 선행 술어가 소유한다 - 셸 구간이 만든 프로세스와 쓰기가 모두 그 판정에 든다.
+    $scanRoot = Join-Path $temporaryRoot 'scan'
+    New-Item -ItemType Directory -Path $scanRoot | Out-Null
+
+    $shell = Start-NoteEx $database
+    $ownedProcesses.Add($shell)
+    $windows = Get-WindowSet $shell 2
+    $shellWindow = $windows[0].Handle
+    $shellTitle = $windows[0].Title
+
+    # G4-1: 실제 상태바/목록/편집기/이력 자식 HWND. 자리표시 페인트 호스트가 아님을 클래스로 굳힌다.
+    $status = [NoteExWindowProbe]::ChildById($shellWindow, 2106)       # IDC_MAIN_STATUS
+    $cardList = [NoteExWindowProbe]::ChildById($shellWindow, 2101)     # IDC_DOCUMENT_CARD_LIST
+    $editor = [NoteExWindowProbe]::ChildById($shellWindow, 2102)       # IDC_DOCUMENT_EDITOR
+    $findInput = [NoteExWindowProbe]::ChildById($shellWindow, 2103)    # IDC_DOCUMENT_FIND
+    $replaceInput = [NoteExWindowProbe]::ChildById($shellWindow, 2104) # IDC_DOCUMENT_REPLACE
+    $historyList = [NoteExWindowProbe]::ChildById($shellWindow, 2105)  # IDC_DOCUMENT_HISTORY
+    $predicates.ActualPageChildWindows =
+        $status -ne [IntPtr]::Zero -and $cardList -ne [IntPtr]::Zero -and
+        $editor -ne [IntPtr]::Zero -and $historyList -ne [IntPtr]::Zero -and
+        $findInput -ne [IntPtr]::Zero -and $replaceInput -ne [IntPtr]::Zero -and
+        [NoteExWindowProbe]::ClassNameOf($status) -eq 'msctls_statusbar32' -and
+        [NoteExWindowProbe]::ClassNameOf($cardList) -eq 'ListBox' -and
+        [NoteExWindowProbe]::ClassNameOf($historyList) -eq 'ListBox' -and
+        [NoteExWindowProbe]::ClassNameOf($editor) -eq 'RICHEDIT50W' -and
+        [NoteExWindowProbe]::IsWindowVisible($status) -and
+        [NoteExWindowProbe]::IsWindowVisible($cardList) -and
+        [NoteExWindowProbe]::IsWindowVisible($editor) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($historyList)
+
+    # G4-2: 첫 붙여넣기가 DB 카드 하나를 만들고 paste 출처와 편집기 연결을 남긴다.
+    # 포커스는 GUI 스레드 큐에 하나뿐이고 두 창이 같은 스레드에 산다. 이후 관측이 이 창을
+    # 가리키도록 먼저 활성화한다(가속기 라우팅도 활성 창 기준이다).
+    [void][NoteExWindowProbe]::Activate($shellWindow)
+    $pasteBody = 'SMOKEPASTEALPHA'
+    try { $savedClipboardText = Get-Clipboard -Raw -ErrorAction Stop } catch { $savedClipboardText = $null }
+    $clipboardCaptured = $true
+    Set-Clipboard -Value $pasteBody
+    $listCountBeforePaste = Send-ProbeMessage $cardList 0x018B          # LB_GETCOUNT
+    $beforePaste = Get-LiveDatabaseFingerprint (Copy-LiveDatabase $database $scanRoot)
+    [void][NoteExWindowProbe]::Send($editor, 0x0302, [UIntPtr]::Zero, [IntPtr]::Zero)   # WM_PASTE
+    $pasteLanded = Wait-Condition { (Send-ProbeMessage $cardList 0x018B) -eq 1 }
+    $afterPaste = Copy-LiveDatabase $database $scanRoot
+    $predicates.FirstPasteCreatesConnectedCard =
+        $listCountBeforePaste -eq 0 -and $pasteLanded -and
+        (Send-ProbeMessage $cardList 0x0188) -eq 0 -and                 # LB_GETCURSEL
+        [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $editor -and
+        (Get-LiveDatabaseFingerprint $afterPaste) -cne $beforePaste -and
+        (Test-CopiesContainUtf8 $afterPaste ('paste' + $pasteBody))
+
+    # G4-3: 정리된 이탈 뒤 목록 Enter 가 저장된 카드와 그 현재 리비전 본문을 연다.
+    if (-not [NoteExWindowProbe]::PostMessage($shellWindow, 0x0111, [UIntPtr]123, [IntPtr]::Zero)) {
+        throw 'Failed to post IDM_BACK for the clean leave'
+    }
+    $leftEditor = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $cardList }
+    $clearedText = ConvertTo-LfText ([NoteExWindowProbe]::WindowTextValue($editor))
+    [NoteExWindowProbe]::SendListEnter($cardList)
+    $reopened = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $editor }
+    $predicates.ListEnterOpensStoredCard =
+        $leftEditor -and $clearedText -ceq '' -and $reopened -and
+        (ConvertTo-LfText ([NoteExWindowProbe]::WindowTextValue($editor))) -ceq $pasteBody -and
+        (Send-ProbeMessage $cardList 0x0188) -eq 0
+
+    # G4-3: Ctrl+Enter 는 LF 하나만 넣고 Ctrl+S 는 그 본문 그대로 DB 에 남긴다.
+    # 저장 본문 계약은 LF 다 - 편집기가 CR 을 남기면 이 술어가 소리내어 깨진다.
+    $savedBody = $pasteBody + "`n" + 'SMOKEBETA'
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $editor, [byte[]]@(0x11), [byte]0x0D)) {
+        throw 'Failed to post Ctrl+Enter to the actual editor'
+    }
+    foreach ($character in 'SMOKEBETA'.ToCharArray()) {
+        [NoteExWindowProbe]::SendCharacter($editor, $character)
+    }
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11), [byte]0x53)) {
+        throw 'Failed to post Ctrl+S through the runtime accelerator table'
+    }
+    $bodyPersisted = Wait-Condition -TimeoutSeconds 5 -Condition {
+        Test-CopiesContainUtf8 (Copy-LiveDatabase $database $scanRoot) ('paste' + $savedBody)
+    }
+    $predicates.CtrlEnterLfSavesExactDbBody =
+        $bodyPersisted -and
+        (Get-LiveDatabaseFingerprint (Copy-LiveDatabase $database $scanRoot)) -cne
+            (Get-LiveDatabaseFingerprint $afterPaste)
+
+    # G4-4: Ctrl+F 는 찾기만, Ctrl+H 는 바꾸기까지 보이고 각각 그 입력에 포커스를 준다.
+    $findHiddenBefore = -not [NoteExWindowProbe]::IsWindowVisible($findInput) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($replaceInput)
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11), [byte]0x46)) {
+        throw 'Failed to post Ctrl+F through the runtime accelerator table'
+    }
+    $findFocused = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $findInput }
+    $findOnly = [NoteExWindowProbe]::IsWindowVisible($findInput) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($replaceInput)
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11), [byte]0x48)) {
+        throw 'Failed to post Ctrl+H through the runtime accelerator table'
+    }
+    $replaceFocused = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $replaceInput }
+    $predicates.FindReplaceVisibilityAndFocus =
+        $findHiddenBefore -and $findFocused -and $findOnly -and $replaceFocused -and
+        [NoteExWindowProbe]::IsWindowVisible($findInput) -and
+        [NoteExWindowProbe]::IsWindowVisible($replaceInput)
+
+    # G4-6: 실제 런타임 HMENU 의 명령 ID 와 HACCEL 발송. 미구현 스텁은 회색으로만 노출된다.
+    $runtimeMenu = [NoteExWindowProbe]::MenuOf($shellWindow)
+    $menuWired = $runtimeMenu -ne [IntPtr]::Zero
+    foreach ($command in @(104, 105, 106, 110, 112, 113, 118, 119, 120, 121, 122, 124)) {
+        $state = [NoteExWindowProbe]::CommandState($runtimeMenu, [uint32]$command)
+        if ($state -eq [uint32]::MaxValue -or ($state -band 0x0003) -ne 0) { $menuWired = $false }
+    }
+    # 131 = IDM_FIRST_RUN_GUIDE (구 128 - IDR_MAINFRAME 충돌로 재조정, Resource.h)
+    foreach ($command in @(111, 114, 115, 116, 117, 125, 126, 127, 131)) {
+        $state = [NoteExWindowProbe]::CommandState($runtimeMenu, [uint32]$command)
+        if ($state -eq [uint32]::MaxValue -or ($state -band 0x0001) -eq 0) { $menuWired = $false }
+    }
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11, 0x10), [byte]0x48)) {
+        throw 'Failed to post Ctrl+Shift+H through the runtime accelerator table'
+    }
+    $historyDispatched = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $historyList }
+    $predicates.RuntimeMenuCommandsAndAcceleratorDispatch =
+        $menuWired -and $historyDispatched -and
+        [NoteExWindowProbe]::IsWindowVisible($historyList) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($cardList)
+
+    # G4-5: 이력에서 카드 목록 모드로 돌아오면 목록이 다시 보이고 포커스를 가져간다.
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11, 0x10), [byte]0x50)) {
+        throw 'Failed to post Ctrl+Shift+P through the runtime accelerator table'
+    }
+    $listFocused = Wait-Condition { [NoteExWindowProbe]::FocusedWindow($shellWindow) -eq $cardList }
+    $predicates.HistoryToCardListModeAndFocus =
+        $listFocused -and [NoteExWindowProbe]::IsWindowVisible($cardList) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($historyList)
+
+    # G4-7: Ctrl+P 가 모달리스 검색 셸을 소유·표시하고 실제 유니코드 질의 EDIT 에 포커스를 준다.
+    $searchAbsentBefore =
+        [NoteExWindowProbe]::ProcessWindowByClass($shell.Id, 'NoteExSearchDialog') -eq [IntPtr]::Zero
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(0x11), [byte]0x50)) {
+        throw 'Failed to post Ctrl+P through the runtime accelerator table'
+    }
+    $searchShown = Wait-Condition {
+        $candidate = [NoteExWindowProbe]::ProcessWindowByClass($shell.Id, 'NoteExSearchDialog')
+        return ($candidate -ne [IntPtr]::Zero -and [NoteExWindowProbe]::IsWindowVisible($candidate))
+    }
+    $searchWindow = [NoteExWindowProbe]::ProcessWindowByClass($shell.Id, 'NoteExSearchDialog')
+    $searchQuery = if ($searchWindow -eq [IntPtr]::Zero) { [IntPtr]::Zero }
+        else { [NoteExWindowProbe]::ChildById($searchWindow, 2107) }   # IDC_SEARCH_QUERY
+    $predicates.ModelessSearchQueryFocus =
+        $searchAbsentBefore -and $searchShown -and $searchQuery -ne [IntPtr]::Zero -and
+        [NoteExWindowProbe]::ClassNameOf($searchQuery) -eq 'Edit' -and
+        [NoteExWindowProbe]::FocusedWindow($searchWindow) -eq $searchQuery
+
+    # G4-8: F11 이 메뉴/상태 HWND/문서 목록 셸을 함께 감추고 체크 상태를 뒤집었다가 되돌린다.
+    # 집중 모드에서는 메뉴가 창에서 떼어지므로 체크 상태는 붙잡아 둔 HMENU 로 읽는다.
+    $documentShell =
+        [NoteExWindowProbe]::OwnedWindowByClass($shell.Id, $shellWindow, 'NoteExDocumentListShell')
+    $focusModeReady = $documentShell -ne [IntPtr]::Zero -and
+        [NoteExWindowProbe]::IsWindowVisible($documentShell) -and
+        [NoteExWindowProbe]::IsWindowVisible($status) -and
+        ([NoteExWindowProbe]::CommandState($runtimeMenu, [uint32]124) -band 0x0008) -eq 0
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(), [byte]0x7A)) {
+        throw 'Failed to post F11 through the runtime accelerator table'
+    }
+    $focusModeEntered = Wait-Condition { [NoteExWindowProbe]::MenuOf($shellWindow) -eq [IntPtr]::Zero }
+    $focusModeHides = $focusModeEntered -and
+        -not [NoteExWindowProbe]::IsWindowVisible($status) -and
+        -not [NoteExWindowProbe]::IsWindowVisible($documentShell) -and
+        ([NoteExWindowProbe]::CommandState($runtimeMenu, [uint32]124) -band 0x0008) -ne 0
+    if (-not [NoteExWindowProbe]::SendChordEx($shellWindow, $shellWindow, [byte[]]@(), [byte]0x7A)) {
+        throw 'Failed to post the second F11 through the runtime accelerator table'
+    }
+    $focusModeLeft = Wait-Condition { [NoteExWindowProbe]::MenuOf($shellWindow) -eq $runtimeMenu }
+    $predicates.FocusModeHidesAndRestoresShell =
+        $focusModeReady -and $focusModeHides -and $focusModeLeft -and
+        [NoteExWindowProbe]::IsWindowVisible($status) -and
+        [NoteExWindowProbe]::IsWindowVisible($documentShell) -and
+        ([NoteExWindowProbe]::CommandState($runtimeMenu, [uint32]124) -band 0x0008) -eq 0
+
+    # G4-9: 재시작이 구조화된 페이지 UI 상태를 되살린다. 분할 크기는 사용자 드래그로만 바뀌므로
+    # 스플리터 바에 실제 마우스 메시지를 넣어 기본값(가용 폭의 1/3)에서 떼어 놓고 비교한다.
+    $splitter = [NoteExWindowProbe]::ChildByClass($shellWindow, 'NoteExWindowSplitter')
+    $leftPane = [NoteExWindowProbe]::ChildById($shellWindow, 2001)
+    $rightPane = [NoteExWindowProbe]::ChildById($shellWindow, 2002)
+    $splitterFrame = [NoteExWindowProbe]::Frame($splitter)
+    $leftFrame = [NoteExWindowProbe]::Frame($leftPane)
+    $rightFrame = [NoteExWindowProbe]::Frame($rightPane)
+    $leftWidthBeforeDrag = $leftFrame.Right - $leftFrame.Left
+    $barX = [int](($leftFrame.Right + $rightFrame.Left) / 2) - $splitterFrame.Left
+    $barY = [int](($leftFrame.Top + $leftFrame.Bottom) / 2) - $splitterFrame.Top
+    $targetX = [int](($splitterFrame.Right - $splitterFrame.Left) / 2)
+    [void][NoteExWindowProbe]::Activate($shellWindow)
+    [void](Send-ProbeMessage $splitter 0x0201 1 (($barY -shl 16) -bor ($barX -band 0xFFFF)))    # WM_LBUTTONDOWN
+    [void](Send-ProbeMessage $splitter 0x0200 1 (($barY -shl 16) -bor ($targetX -band 0xFFFF))) # WM_MOUSEMOVE
+    [void](Send-ProbeMessage $splitter 0x0202 0 (($barY -shl 16) -bor ($targetX -band 0xFFFF))) # WM_LBUTTONUP
+    $draggedFrame = [NoteExWindowProbe]::Frame($leftPane)
+    $draggedWidth = $draggedFrame.Right - $draggedFrame.Left
+    [void](Send-ProbeMessage $editor 0x00B1 5 5)                        # EM_SETSEL
+    $selectionBefore = Send-ProbeMessage $editor 0x00B0                 # EM_GETSEL
+    $listCountBefore = Send-ProbeMessage $cardList 0x018B
+    $listSelectionBefore = Send-ProbeMessage $cardList 0x0188
+    if (-not [NoteExWindowProbe]::PostMessage($shellWindow, 0x0111, [UIntPtr]105, [IntPtr]::Zero)) {
+        throw 'Failed to post IDM_EXIT after the shell spine phase'
+    }
+    Wait-ProcessExit $shell
+
+    $restarted = Start-NoteEx $database
+    $ownedProcesses.Add($restarted)
+    $windows = Get-WindowSet $restarted 2
+    $restoredMatches = @($windows | Where-Object { $_.Title -ceq $shellTitle })
+    if ($restoredMatches.Count -eq 1) {
+        $restoredWindow = $restoredMatches[0].Handle
+        $restoredEditor = [NoteExWindowProbe]::ChildById($restoredWindow, 2102)
+        $restoredList = [NoteExWindowProbe]::ChildById($restoredWindow, 2101)
+        $restoredLeftFrame = [NoteExWindowProbe]::Frame(
+            [NoteExWindowProbe]::ChildById($restoredWindow, 2001))
+        $restoredLeftWidth = $restoredLeftFrame.Right - $restoredLeftFrame.Left
+        $predicates.RestartRestoresPageUiState =
+            $draggedWidth -ge ($leftWidthBeforeDrag + 16) -and
+            $selectionBefore -eq ((5 -shl 16) -bor 5) -and
+            (ConvertTo-LfText ([NoteExWindowProbe]::WindowTextValue($restoredEditor))) -ceq $savedBody -and
+            (Send-ProbeMessage $restoredEditor 0x00B0) -eq $selectionBefore -and
+            (Send-ProbeMessage $restoredList 0x018B) -eq $listCountBefore -and
+            (Send-ProbeMessage $restoredList 0x0188) -eq $listSelectionBefore -and
+            [Math]::Abs($restoredLeftWidth - $draggedWidth) -le 4
+    }
+    if (-not [NoteExWindowProbe]::PostMessage($windows[0].Handle, 0x0111, [UIntPtr]105, [IntPtr]::Zero)) {
+        throw 'Failed to post IDM_EXIT after the shell spine restart'
+    }
+    Wait-ProcessExit $restarted
+
     $iniPath = Join-Path $env:LOCALAPPDATA 'pyNote\pyNote\NoteEx.ini'
     $predicates.D8IniExists = Test-Path -LiteralPath $iniPath -PathType Leaf
     if ($predicates.D8IniExists) {
@@ -543,6 +952,16 @@ try {
         try { $_.Refresh(); -not $_.HasExited } catch { $false }
     }).Count -eq 0
     $env:LOCALAPPDATA = $savedLocalAppData
+    # 붙여넣기 출처 검증에 실제 클립보드가 필요해 텍스트만 저장·복원한다. 원래 내용이
+    # 텍스트가 아니었으면 되돌릴 수 없으므로 표식만 지우고 만다.
+    if ($clipboardCaptured) {
+        try {
+            if ([string]::IsNullOrEmpty($savedClipboardText)) { Set-Clipboard -Value ' ' }
+            else { Set-Clipboard -Value $savedClipboardText }
+        } catch {
+            if ($null -eq $failure) { $failure = $_ }
+        }
+    }
     try {
         if (Test-Path -LiteralPath $temporaryRoot) {
             Remove-Item -LiteralPath $temporaryRoot -Recurse -Force

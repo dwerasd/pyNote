@@ -2,6 +2,8 @@
 
 #include "Resource.h"
 
+#include <algorithm>
+
 namespace
 {
 	constexpr wchar_t DOCUMENT_SHELL_CLASS[] = L"NoteExDocumentListShell";
@@ -99,6 +101,15 @@ std::vector<ACCEL> pynote::shell::RuntimeAccelerators()
 		{ FVIRTKEY, VK_ESCAPE, IDM_BACK },
 		{ FVIRTKEY, VK_F11, IDM_FOCUS_MODE },
 	};
+}
+
+bool pynote::shell::RouteFrameMessage(MSG* _pMessage, HWND _hFrame,
+	const std::function<bool(MSG*)>& _PreTranslate, HACCEL _hAccelerator)
+{
+	if (!_pMessage || !::IsWindow(_hFrame)) { return(false); }
+	if (_pMessage->hwnd != _hFrame && !::IsChild(_hFrame, _pMessage->hwnd)) { return(false); }
+	if (_PreTranslate && _PreTranslate(_pMessage)) { return(true); }
+	return(_hAccelerator && ::TranslateAcceleratorW(_hFrame, _hAccelerator, _pMessage) != FALSE);
 }
 
 bool pynote::shell::ApplyFocusMode(HWND _hMain, HMENU _hRuntimeMenu, HWND _hStatus,

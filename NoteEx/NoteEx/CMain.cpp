@@ -255,10 +255,14 @@ LRESULT C_MAIN::OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	}
 	m_LeftPane.Initialize(this, false);
 	m_EditorPane.Initialize(this, true);
+	// 페이지 실자식(목록·편집기·찾기/바꾸기·이력)이 pane 을 채우므로 WS_CLIPCHILDREN 이
+	// 없으면 pane 배경 페인트(D2D render_ 포함)가 자식 표면을 덮어 그린다.
 	if (nullptr == m_LeftPane.Create(
-		m_Splitter, Empty, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, LEFT_PANE_ID) ||
+		m_Splitter, Empty, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+		0, LEFT_PANE_ID) ||
 		nullptr == m_EditorPane.Create(
-			m_Splitter, Empty, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, EDITOR_PANE_ID))
+			m_Splitter, Empty, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+			0, EDITOR_PANE_ID))
 	{
 		return(-1);
 	}

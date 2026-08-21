@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "CApplication.h"
 
+#include "CDocumentListShell.h"
 #include "CMain.h"
 #include "CSearchDialog.h"
 #include "CWindowLayout.h"
@@ -120,8 +121,9 @@ struct CApplication::S_STATE : CMessageFilter
 		if (!Active) { return(FALSE); }
 		const auto it = Windows.find(*Active);
 		if (it == Windows.end() || !it->second) { return(FALSE); }
-		if (it->second->PreTranslateMessage(_pMessage)) { return(TRUE); }
-		return(hAccelerator && ::TranslateAcceleratorW(it->second->m_hWnd, hAccelerator, _pMessage));
+		return(pynote::shell::RouteFrameMessage(_pMessage, it->second->m_hWnd,
+			[&](MSG* _pRouted) { return(it->second->PreTranslateMessage(_pRouted)); },
+			hAccelerator) ? TRUE : FALSE);
 	}
 
 	std::string make_identity(const char* _pszPrefix)
