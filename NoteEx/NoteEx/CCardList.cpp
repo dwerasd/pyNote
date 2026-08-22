@@ -24,6 +24,14 @@ namespace
 	// 미리보기 레이아웃의 높이 한도. D2DWrapp 기본값과 같은 "사실상 무제한"이다.
 	constexpr float PREVIEW_LAYOUT_MAX_HEIGHT_DIP = 100000.0f;
 
+	// Qt manhattanLength() 등가. 정수 DIP 로만 잰다.
+	int manhattan_dip(POINT _First, POINT _Second) noexcept
+	{
+		const int nX = _First.x - _Second.x;
+		const int nY = _First.y - _Second.y;
+		return((nX < 0 ? -nX : nX) + (nY < 0 ? -nY : nY));
+	}
+
 	bool is_high_surrogate(wchar_t _ch) noexcept { return(_ch >= 0xD800 && _ch <= 0xDBFF); }
 	bool is_low_surrogate(wchar_t _ch) noexcept { return(_ch >= 0xDC00 && _ch <= 0xDFFF); }
 
@@ -173,6 +181,72 @@ S_CARD_PALETTE ResolveCardPalette(const S_SYSTEM_COLORS& _Colors, bool) noexcept
 	return(Palette);
 }
 
+E_CARD_SELECTION_COMMAND ResolveSelectionCommand(const S_CARD_SELECTION_INPUT& _Input) noexcept
+{
+	// Qt 6.9 QAbstractItemViewPrivate::selectionCommand / extendedSelectionCommand 의 규칙이다.
+	// 단언은 오라클 표(spec 부록 A)이고 이 함수는 그 표를 재생산한다.
+	const bool bNavigationKey =
+		_Input.nKey == VK_UP || _Input.nKey == VK_DOWN || _Input.nKey == VK_LEFT ||
+		_Input.nKey == VK_RIGHT || _Input.nKey == VK_HOME || _Input.nKey == VK_END ||
+		_Input.nKey == VK_PRIOR || _Input.nKey == VK_NEXT;
+
+	if (_Input.eMode == domain::E_CARD_SELECTION_MODE::Single)
+	{
+		if (_Input.ePhase == E_CARD_INPUT_PHASE::Release) { return(E_CARD_SELECTION_COMMAND::NoUpdate); }
+		// Ctrl+클릭·Ctrl+Space 로 선택된 카드를 누르면 선택만 풀린다(현재는 그대로 - M3/K3 single).
+		if (_Input.bCtrl && _Input.bRowSelected && _Input.ePhase != E_CARD_INPUT_PHASE::Move)
+		{
+			return(E_CARD_SELECTION_COMMAND::Deselect);
+		}
+		if (_Input.ePhase == E_CARD_INPUT_PHASE::Move && _Input.bDragSelecting)
+		{
+			return(E_CARD_SELECTION_COMMAND::BandReplace);
+		}
+		return(E_CARD_SELECTION_COMMAND::ClearAndSelect);
+	}
+
+	switch (_Input.ePhase)
+	{
+	case E_CARD_INPUT_PHASE::Press:
+		// 이미 선택된 행의 평범한 press 는 release 로 미룬다 - 드래그가 시작될 수 있다(M10).
+		if (!_Input.bShift && !_Input.bCtrl && _Input.bRowSelected) { return(E_CARD_SELECTION_COMMAND::NoUpdate); }
+		// Qt 는 빈 영역 press 에 Clear 를 돌려주지만 press 시점에 적용하지 않는다 - 지우는 것은 release 다.
+		if (!_Input.bRowValid) { return(E_CARD_SELECTION_COMMAND::NoUpdate); }
+		if (_Input.bCtrl && _Input.bPressedAlreadySelected) { return(E_CARD_SELECTION_COMMAND::NoUpdate); }
+		break;
+	case E_CARD_INPUT_PHASE::Release:
+		if (((_Input.bSamePressedRow && _Input.bRowSelected) || !_Input.bRowValid) &&
+			!_Input.bDragSelecting && !_Input.bShift && !_Input.bCtrl)
+		{
+			return(E_CARD_SELECTION_COMMAND::ClearAndSelect);
+		}
+		if (_Input.bSamePressedRow && _Input.bCtrl && _Input.bPressedAlreadySelected)
+		{
+			return(E_CARD_SELECTION_COMMAND::Toggle);
+		}
+		return(E_CARD_SELECTION_COMMAND::NoUpdate);
+	case E_CARD_INPUT_PHASE::Move:
+		if (_Input.bDragSelecting)
+		{
+			if (_Input.bCtrl) { return(E_CARD_SELECTION_COMMAND::BandToggle); }
+			if (_Input.bShift) { return(E_CARD_SELECTION_COMMAND::SelectCurrent); }
+			return(E_CARD_SELECTION_COMMAND::BandReplace);
+		}
+		break;
+	case E_CARD_INPUT_PHASE::Key:
+		// Ctrl+방향키는 현재만 옮기고 선택은 그대로다(K3/K7 extended).
+		if (bNavigationKey && _Input.bCtrl) { return(E_CARD_SELECTION_COMMAND::NoUpdate); }
+		if (_Input.nKey == VK_SPACE)
+		{
+			return(_Input.bCtrl ? E_CARD_SELECTION_COMMAND::Toggle : E_CARD_SELECTION_COMMAND::Select);
+		}
+		break;
+	}
+	if (_Input.bShift) { return(E_CARD_SELECTION_COMMAND::SelectCurrent); }
+	if (_Input.bCtrl) { return(E_CARD_SELECTION_COMMAND::Toggle); }
+	return(E_CARD_SELECTION_COMMAND::ClearAndSelect);
+}
+
 std::vector<std::wstring> ComputeDisplayLines(
 	std::wstring_view _sText, bool _bTruncated, d2d::C_D2D_TEXT& _Text,
 	IDWriteTextFormat* _pFormat, int _nContentWidthDip, std::size_t _nMaxLines)
@@ -240,11 +314,37 @@ C_CARD_LIST::~C_CARD_LIST()
 void C_CARD_LIST::Bind(domain::C_CARD_LIST_PROJECTION& _Projection) noexcept
 {
 	m_pProjection = &_Projection;
+	// 새 프로젝션은 새 목록이다 - 앵커·Shift 기준·"현재를 본 적 있는가" 를 모두 되돌린다.
+	m_bCurrentObserved = false;
+	m_sAnchorCardId.reset();
+	m_ShiftBase.clear();
 }
 
 void C_CARD_LIST::SetActivateHandler(ActivateHandler _Handler)
 {
 	m_Activate = std::move(_Handler);
+}
+
+void C_CARD_LIST::SetOpenCardHandler(OpenCardHandler _Handler)
+{
+	m_OpenCard = std::move(_Handler);
+}
+
+void C_CARD_LIST::SetEmptyAreaClickHandler(EmptyAreaClickHandler _Handler)
+{
+	m_EmptyAreaClick = std::move(_Handler);
+}
+
+void C_CARD_LIST::SetDeleteHandler(DeleteHandler _Handler)
+{
+	m_Delete = std::move(_Handler);
+}
+
+void C_CARD_LIST::PostDeferred(std::function<void()> _Callable)
+{
+	if (!_Callable || !this->IsWindow()) { return; }
+	m_Deferred.push_back(std::move(_Callable));
+	::PostMessageW(this->m_hWnd, CARD_LIST_DEFERRED_MESSAGE, 0, 0);
 }
 
 void C_CARD_LIST::AttachRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -273,6 +373,13 @@ void C_CARD_LIST::SetDisplaySettings(const S_CARD_LIST_DISPLAY& _Display)
 void C_CARD_LIST::OnProjectionChanged()
 {
 	m_nHoverRow.reset();
+	this->observe_current_();
+	// 앵커는 카드 id 로 들고 있다 - 정렬·필터·삭제로 행을 잃으면 Shift 기준째 버린다.
+	if (m_sAnchorCardId && (!m_pProjection || !m_pProjection->RowForCard(*m_sAnchorCardId)))
+	{
+		m_sAnchorCardId.reset();
+		m_ShiftBase.clear();
+	}
 	this->ScrollToPixel(m_nScrollOffsetDip);
 	this->update_scroll_bar_();
 	if (this->IsWindow()) { this->Invalidate(FALSE); }
@@ -415,6 +522,347 @@ std::optional<std::size_t> C_CARD_LIST::current_row_() const
 	const auto& sCurrent = m_pProjection->CurrentCardId();
 	// 현재 카드가 행을 잃었으면(필터·삭제) 선택 없음으로 읽는다.
 	return(sCurrent ? m_pProjection->RowForCard(*sCurrent) : std::nullopt);
+}
+
+POINT C_CARD_LIST::point_from_lparam_(LPARAM _lParam) const noexcept
+{
+	// 캡처된 릴리스는 음수 클라이언트 좌표를 실어 온다 - LOWORD 로 읽으면 -5 가 65531 이 된다.
+	return(POINT{ this->client_dip_(GET_X_LPARAM(_lParam)), this->client_dip_(GET_Y_LPARAM(_lParam)) });
+}
+
+bool C_CARD_LIST::inside_viewport_(POINT _Point) const
+{
+	// 세로 스크롤바는 클라이언트 밖이라 클라이언트 사각이 곧 뷰포트다(Qt viewport().rect()).
+	return(_Point.x >= 0 && _Point.y >= 0 &&
+		_Point.x < this->ViewportWidthDip() && _Point.y < this->ViewportHeightDip());
+}
+
+std::optional<std::size_t> C_CARD_LIST::row_at_point_(POINT _Point) const
+{
+	if (!this->inside_viewport_(_Point)) { return(std::nullopt); }
+	return(this->row_at_dip_(_Point.y));
+}
+
+std::optional<std::size_t> C_CARD_LIST::HitTestRow(POINT _ClientPx) const
+{
+	return(this->row_at_point_(
+		POINT{ this->client_dip_(_ClientPx.x), this->client_dip_(_ClientPx.y) }));
+}
+
+bool C_CARD_LIST::IsRowSelected(std::size_t _nRow) const
+{
+	if (!m_pProjection) { return(false); }
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return(false); }
+	const std::vector<std::string>& Selected = m_pProjection->SelectedCardIds();
+	return(std::find(Selected.begin(), Selected.end(), pCard->sId) != Selected.end());
+}
+
+std::optional<std::size_t> C_CARD_LIST::AnchorRow() const
+{
+	if (!m_pProjection || !m_sAnchorCardId) { return(std::nullopt); }
+	return(m_pProjection->RowForCard(*m_sAnchorCardId));
+}
+
+void C_CARD_LIST::set_anchor_(std::optional<std::size_t> _nRow)
+{
+	m_sAnchorCardId.reset();
+	if (!_nRow || !m_pProjection) { return; }
+	const domain::S_CARD* pCard = m_pProjection->CardAt(*_nRow);
+	if (pCard) { m_sAnchorCardId = pCard->sId; }
+}
+
+void C_CARD_LIST::observe_current_()
+{
+	if (m_pProjection && m_pProjection->CurrentCardId()) { m_bCurrentObserved = true; }
+}
+
+void C_CARD_LIST::select_row_additive_(std::size_t _nRow)
+{
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return; }
+	m_pProjection->SelectVisibleCard(pCard->sId, domain::E_CARD_SELECTION_INTENT::Additive);
+	this->set_anchor_(_nRow);
+	m_ShiftBase = m_pProjection->SelectedCardIds();
+}
+
+void C_CARD_LIST::deselect_row_(std::size_t _nRow)
+{
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return; }
+	const std::string sCardId = pCard->sId;
+	std::vector<std::string> Remaining = m_pProjection->SelectedCardIds();
+	Remaining.erase(std::remove(Remaining.begin(), Remaining.end(), sCardId), Remaining.end());
+	m_pProjection->SetSelectedCardIds(std::move(Remaining));
+	// 선택만 풀고 현재는 대상 행에 남긴다(Qt Deselect + 현재 유지 - M3).
+	m_pProjection->SetCurrentCardId(sCardId);
+	this->set_anchor_(_nRow);
+	m_ShiftBase = m_pProjection->SelectedCardIds();
+}
+
+std::vector<std::string> C_CARD_LIST::band_rows_(int _nCursorYdip) const
+{
+	std::vector<std::string> Rows;
+	if (!m_pProjection) { return(Rows); }
+	const std::size_t nCount = this->RowCount();
+	const int nRowHeight = this->RowHeightDip();
+	if (nCount == 0 || nRowHeight <= 0) { return(Rows); }
+	if (m_pProjection->SelectionMode() == domain::E_CARD_SELECTION_MODE::Single)
+	{
+		// 단일 선택의 Qt 는 1x1 사각을 쓴다 - 띠가 아니라 커서 아래 한 행이다(M13/M15 single).
+		const std::optional<std::size_t> nRow = this->row_at_dip_(_nCursorYdip);
+		const domain::S_CARD* pCard = nRow ? m_pProjection->CardAt(*nRow) : nullptr;
+		if (pCard) { Rows.push_back(pCard->sId); }
+		return(Rows);
+	}
+	// 닫힌 정수 구간의 교차다. press 와 커서는 뷰포트 좌표라 내용 좌표로 올려서 잰다.
+	const int nPress = m_PressPoint.y + m_nScrollOffsetDip;
+	const int nCursor = _nCursorYdip + m_nScrollOffsetDip;
+	const int nLow = (std::min)(nPress, nCursor);
+	const int nHigh = (std::max)(nPress, nCursor);
+	for (std::size_t nRow = 0; nRow < nCount; ++nRow)
+	{
+		const int nTop = static_cast<int>(nRow) * nRowHeight;
+		const int nBottom = nTop + nRowHeight - 1;
+		if (nBottom < nLow || nTop > nHigh) { continue; }
+		const domain::S_CARD* pCard = m_pProjection->CardAt(nRow);
+		if (pCard) { Rows.push_back(pCard->sId); }
+	}
+	return(Rows);
+}
+
+std::size_t C_CARD_LIST::page_row_(std::size_t _nCurrentRow, bool _bDown) const
+{
+	// CEILING: 스크롤되는 목록의 PageUp/Down 행 선택은 Qt closestIndex 미이식, 근사다
+	// (전 행이 한 화면에 보이는 오라클 K1/K7 조건에서는 정확히 마지막/첫 행이 된다).
+	const std::size_t nCount = this->RowCount();
+	const int nRowHeight = this->RowHeightDip();
+	if (nCount == 0 || nRowHeight <= 0) { return(0); }
+	const long long nTop = static_cast<long long>(_nCurrentRow) * nRowHeight;
+	const long long nStep = (std::max)(0, this->ViewportHeightDip() - 1);
+	const long long nPoint = nTop + (_bDown ? nStep : -nStep);
+	if (nPoint < 0) { return(0); }
+	if (nPoint >= static_cast<long long>(nCount) * nRowHeight) { return(nCount - 1); }
+	return(static_cast<std::size_t>(nPoint / nRowHeight));
+}
+
+void C_CARD_LIST::apply_selection_command_(E_CARD_SELECTION_COMMAND _eCommand,
+	E_CARD_INPUT_PHASE _ePhase, std::optional<std::size_t> _nTargetRow,
+	std::optional<std::size_t> _nOldCurrentRow, const std::vector<std::string>& _Band)
+{
+	if (!m_pProjection || _eCommand == E_CARD_SELECTION_COMMAND::NoUpdate) { return; }
+	// Qt mousePressEvent 는 유효하지 않은 행의 press 명령을 적용하지 않는다(M12/M16 single).
+	if (_ePhase == E_CARD_INPUT_PHASE::Press && !_nTargetRow) { return; }
+	const domain::S_CARD* pTarget = _nTargetRow ? m_pProjection->CardAt(*_nTargetRow) : nullptr;
+	const std::string sTargetId = pTarget ? pTarget->sId : std::string{};
+	switch (_eCommand)
+	{
+	case E_CARD_SELECTION_COMMAND::ClearAndSelect:
+		if (!pTarget)
+		{
+			// release/키 단계의 유효하지 않은 행은 선택을 비운다(현재는 그대로 - M16 extended).
+			m_pProjection->SetSelectedCardIds({});
+			break;
+		}
+		m_pProjection->SelectVisibleCard(sTargetId, domain::E_CARD_SELECTION_INTENT::Replace);
+		this->set_anchor_(_nTargetRow);
+		m_ShiftBase = { sTargetId };
+		break;
+	case E_CARD_SELECTION_COMMAND::Select:
+		if (pTarget) { this->select_row_additive_(*_nTargetRow); }
+		break;
+	case E_CARD_SELECTION_COMMAND::Deselect:
+		if (pTarget) { this->deselect_row_(*_nTargetRow); }
+		break;
+	case E_CARD_SELECTION_COMMAND::Toggle:
+		if (!pTarget) { break; }
+		if (this->IsRowSelected(*_nTargetRow)) { this->deselect_row_(*_nTargetRow); }
+		else { this->select_row_additive_(*_nTargetRow); }
+		break;
+	case E_CARD_SELECTION_COMMAND::SelectCurrent:
+	{
+		if (!pTarget) { break; }
+		std::optional<std::size_t> nAnchor = this->AnchorRow();
+		if (!nAnchor)
+		{
+			// Qt currentSelectionStartIndex = currentIndex() 폴백이다 - 이 입력이 현재를
+			// 옮기기 전의 행이 앵커가 되고 그때의 선택이 Shift 기준이 된다(M8 extended).
+			nAnchor = _nOldCurrentRow ? _nOldCurrentRow : _nTargetRow;
+			this->set_anchor_(nAnchor);
+			m_ShiftBase = m_pProjection->SelectedCardIds();
+		}
+		const std::size_t nFirst = (std::min)(*nAnchor, *_nTargetRow);
+		const std::size_t nLast = (std::max)(*nAnchor, *_nTargetRow);
+		std::vector<std::string> Ids;
+		for (std::size_t nRow = 0; nRow < this->RowCount(); ++nRow)
+		{
+			const domain::S_CARD* pCard = m_pProjection->CardAt(nRow);
+			if (!pCard) { continue; }
+			const bool bInRange = nRow >= nFirst && nRow <= nLast;
+			const bool bInBase =
+				std::find(m_ShiftBase.begin(), m_ShiftBase.end(), pCard->sId) != m_ShiftBase.end();
+			if (bInRange || bInBase) { Ids.push_back(pCard->sId); }
+		}
+		m_pProjection->SetSelectedCardIds(std::move(Ids));
+		m_pProjection->SetCurrentCardId(sTargetId);
+		// 앵커는 그대로다 - 이어지는 Shift 클릭도 같은 기준에서 뻗는다(M5 extended).
+		break;
+	}
+	case E_CARD_SELECTION_COMMAND::BandReplace:
+		// core 의 SetSelectedCardIds 는 단일 선택에서 현재 카드로 접는다 - 현재를 먼저 옮긴다.
+		if (pTarget) { m_pProjection->SetCurrentCardId(sTargetId); }
+		m_pProjection->SetSelectedCardIds(_Band);
+		m_ShiftBase = m_pProjection->SelectedCardIds();
+		break;
+	case E_CARD_SELECTION_COMMAND::BandToggle:
+	{
+		if (pTarget) { m_pProjection->SetCurrentCardId(sTargetId); }
+		std::vector<std::string> Ids = m_pProjection->SelectedCardIds();
+		for (const std::string& sId : _Band)
+		{
+			const auto It = std::find(Ids.begin(), Ids.end(), sId);
+			if (m_bCtrlDragSelect) { if (It == Ids.end()) { Ids.push_back(sId); } }
+			else if (It != Ids.end()) { Ids.erase(It); }
+		}
+		m_pProjection->SetSelectedCardIds(std::move(Ids));
+		break;
+	}
+	default:
+		break;
+	}
+	this->observe_current_();
+	// 행 단위 무효화는 S5 의 몫이다 - 여기서는 정확성을 먼저 둔다.
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+}
+
+void C_CARD_LIST::reset_press_state_()
+{
+	m_bPressActive = false;
+	m_PressedRow.reset();
+	m_bPressOnEmpty = false;
+	m_bPressedAlreadySelected = false;
+	m_bDragConsumedPress = false;
+	m_bEmptyPress = false;
+	m_bEmptyPressMoved = false;
+	m_bNoSelectionOnMousePress = false;
+	m_eViewState = E_CARD_LIST_VIEW_STATE::NoState;
+	m_DragSnapshot.reset();
+}
+
+void C_CARD_LIST::handle_navigation_key_(int _nKey)
+{
+	if (!m_pProjection) { return; }
+	const std::size_t nCount = this->RowCount();
+	if (nCount == 0) { return; }
+	const std::optional<std::size_t> nOld = this->current_row_();
+	std::size_t nNew = 0;
+	if (nOld)
+	{
+		switch (_nKey)
+		{
+		case VK_DOWN: nNew = (std::min)(*nOld + 1, nCount - 1); break;
+		case VK_UP: nNew = *nOld > 0 ? *nOld - 1 : 0; break;
+		case VK_HOME: nNew = 0; break;
+		case VK_END: nNew = nCount - 1; break;
+		case VK_NEXT: nNew = this->page_row_(*nOld, true); break;
+		default: nNew = this->page_row_(*nOld, false); break;
+		}
+		// Qt 는 newCurrent != oldCurrent 일 때만 움직인다(K1b 의 행 0 Up).
+		if (nNew == *nOld) { return; }
+	}
+	S_CARD_SELECTION_INPUT Input{};
+	Input.eMode = m_pProjection->SelectionMode();
+	Input.ePhase = E_CARD_INPUT_PHASE::Key;
+	Input.bRowValid = true;
+	Input.bRowSelected = this->IsRowSelected(nNew);
+	Input.bCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+	Input.bShift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	Input.nKey = _nKey;
+	const E_CARD_SELECTION_COMMAND eCommand = ResolveSelectionCommand(Input);
+	if (eCommand == E_CARD_SELECTION_COMMAND::NoUpdate)
+	{
+		// Qt 는 Current 플래그가 없는 분기에서 NoUpdate 여도 앵커를 새 현재로 옮긴다.
+		const domain::S_CARD* pCard = m_pProjection->CardAt(nNew);
+		if (pCard) { m_pProjection->SetCurrentCardId(pCard->sId); }
+		this->set_anchor_(nNew);
+		m_ShiftBase = m_pProjection->SelectedCardIds();
+		if (this->IsWindow()) { this->Invalidate(FALSE); }
+	}
+	else { this->apply_selection_command_(eCommand, E_CARD_INPUT_PHASE::Key, nNew, nOld, {}); }
+	this->EnsureVisible(nNew);
+	this->observe_current_();
+}
+
+void C_CARD_LIST::handle_space_key_()
+{
+	if (!m_pProjection) { return; }
+	const std::optional<std::size_t> nCurrent = this->current_row_();
+	if (!nCurrent) { return; }
+	S_CARD_SELECTION_INPUT Input{};
+	Input.eMode = m_pProjection->SelectionMode();
+	Input.ePhase = E_CARD_INPUT_PHASE::Key;
+	Input.bRowValid = true;
+	Input.bRowSelected = this->IsRowSelected(*nCurrent);
+	Input.bCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+	Input.bShift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	Input.nKey = VK_SPACE;
+	this->apply_selection_command_(
+		ResolveSelectionCommand(Input), E_CARD_INPUT_PHASE::Key, nCurrent, nCurrent, {});
+}
+
+bool C_CARD_LIST::prefix_match_(std::size_t _nRow, const std::wstring& _sPrefix) const
+{
+	if (_sPrefix.empty() || !m_pProjection) { return(false); }
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return(false); }
+	const std::optional<std::string_view> sBody = m_pProjection->FullBodyForCard(pCard->sId);
+	if (!sBody) { return(false); }
+	const std::wstring sWide = wide(std::string(*sBody));
+	if (sWide.size() < _sPrefix.size()) { return(false); }
+	// CEILING: Qt 는 유니코드 대소문자 접기를 쓴다 - 라틴 밖 특수 케이스에서 서수 비교와 갈릴 수 있다.
+	return(::CompareStringOrdinal(sWide.c_str(), static_cast<int>(_sPrefix.size()),
+		_sPrefix.c_str(), static_cast<int>(_sPrefix.size()), TRUE) == CSTR_EQUAL);
+}
+
+void C_CARD_LIST::keyboard_search_(wchar_t _Char)
+{
+	// QAbstractItemView::keyboardSearch 이식. 표시 문자열은 카드 본문 전체다(card_model.py:103~105).
+	if (!m_pProjection) { return; }
+	const std::size_t nCount = this->RowCount();
+	if (nCount == 0) { return; }
+	const std::optional<std::size_t> nCurrent = this->current_row_();
+	const std::uint64_t nNow = ::GetTickCount64();
+	bool bSkipRow = false;
+	if (m_sSearchInput.empty() || nNow - m_nSearchTickMs > CARD_KEYBOARD_SEARCH_INTERVAL_MS)
+	{
+		m_sSearchInput.assign(1, _Char);
+		bSkipRow = nCurrent.has_value();
+	}
+	else { m_sSearchInput.push_back(_Char); }
+	m_nSearchTickMs = nNow;
+
+	if (m_sSearchInput.size() > 1)
+	{
+		// 같은 글자만 이어지는 입력은 시작 행만 한 칸 민다 - 찾는 문자열은 줄이지 않고 누적된
+		// 접두사 그대로다. 실측(본문 alpha/avocado/bravo/charlie/delta, 행 0 에서 'a' 연타):
+		// 첫 'a' 는 avocado(행 1), 400ms 안의 둘째·셋째 'a' 는 "aa"/"aaa" 로 찾아 맞는 행이
+		// 없으므로 행 1 에 그대로 머문다.
+		const bool bSameKey =
+			static_cast<std::size_t>(std::count(m_sSearchInput.begin(), m_sSearchInput.end(),
+				m_sSearchInput.back())) == m_sSearchInput.size();
+		if (bSameKey) { bSkipRow = true; }
+	}
+	std::size_t nStart = nCurrent ? *nCurrent : 0;
+	if (bSkipRow) { nStart = nStart + 1 < nCount ? nStart + 1 : 0; }
+	for (std::size_t nOffset = 0; nOffset < nCount; ++nOffset)
+	{
+		const std::size_t nRow = (nStart + nOffset) % nCount;
+		if (!this->prefix_match_(nRow, m_sSearchInput)) { continue; }
+		this->apply_selection_command_(
+			E_CARD_SELECTION_COMMAND::ClearAndSelect, E_CARD_INPUT_PHASE::Key, nRow, nCurrent, {});
+		this->EnsureVisible(nRow);
+		break;
+	}
 }
 
 void C_CARD_LIST::capture_palette_()
@@ -612,6 +1060,7 @@ void C_CARD_LIST::draw_row_(ID2D1DeviceContext* _pDc, std::size_t _nRow, IDWrite
 
 bool C_CARD_LIST::render_()
 {
+	this->observe_current_();
 	m_Frame = S_CARD_LIST_FRAME{};
 	if (!this->ensure_target_() || !m_Target.BeginDraw()) { return(false); }
 	ID2D1DeviceContext* pDc = m_Target.GetDC();
@@ -706,7 +1155,7 @@ LRESULT C_CARD_LIST::OnVScroll(UINT, WPARAM _wParam, LPARAM, BOOL&)
 	return(0);
 }
 
-LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM, LPARAM _lParam, BOOL&)
+LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 {
 	if (!m_bTrackingMouse)
 	{
@@ -716,13 +1165,216 @@ LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM, LPARAM _lParam, BOOL&)
 		Track.hwndTrack = this->m_hWnd;
 		m_bTrackingMouse = ::TrackMouseEvent(&Track) != FALSE;
 	}
-	const std::optional<std::size_t> nRow = this->row_at_dip_(this->client_dip_(GET_Y_LPARAM(_lParam)));
+	const POINT Point = this->point_from_lparam_(_lParam);
+	const std::optional<std::size_t> nRow = this->row_at_dip_(Point.y);
 	if (nRow != m_nHoverRow)
 	{
 		this->invalidate_row_(m_nHoverRow);
 		m_nHoverRow = nRow;
 		this->invalidate_row_(m_nHoverRow);
 	}
+	if ((_wParam & MK_LBUTTON) == 0 || !m_bPressActive || m_bDragConsumedPress) { return(0); }
+
+	const int nManhattan = manhattan_dip(Point, m_PressPoint);
+	if (m_bPressOnEmpty)
+	{
+		// 원본 mouseMoveEvent 의 두 갈래다: 임계 도달과 고무줄 진입이 각각 clean click 을 깬다.
+		if (m_bEmptyPress && nManhattan >= CARD_DRAG_DISTANCE_DIP) { m_bEmptyPressMoved = true; }
+		const std::optional<std::size_t> nTarget = this->row_at_point_(Point);
+		// Qt selectionAllowed: 커서가 유효한 행 위에 있을 때만 고무줄이 선다(M14 는 NoState 로 남는다).
+		if (!nTarget || !m_pProjection) { return(0); }
+		m_eViewState = E_CARD_LIST_VIEW_STATE::DragSelecting;
+		if (m_bEmptyPress) { m_bEmptyPressMoved = true; }
+		S_CARD_SELECTION_INPUT Input{};
+		Input.eMode = m_pProjection->SelectionMode();
+		Input.ePhase = E_CARD_INPUT_PHASE::Move;
+		Input.bRowValid = true;
+		Input.bRowSelected = this->IsRowSelected(*nTarget);
+		Input.bPressedAlreadySelected = m_bPressedAlreadySelected;
+		Input.bSamePressedRow = nTarget == m_PressedRow;
+		Input.bCtrl = (_wParam & MK_CONTROL) != 0;
+		Input.bShift = (_wParam & MK_SHIFT) != 0;
+		Input.bDragSelecting = true;
+		this->apply_selection_command_(ResolveSelectionCommand(Input), E_CARD_INPUT_PHASE::Move,
+			nTarget, this->current_row_(), this->band_rows_(Point.y));
+		return(0);
+	}
+	if (m_PressedRow)
+	{
+		// Qt 는 버튼을 쥔 첫 이동에서 DraggingState 로 들어가고(임계와 무관 - M11),
+		// 임계를 "넘어선" 이동에서 pressedIndex 를 비우고 startDrag 뒤 NoState 로 돌아온다.
+		if (m_eViewState == E_CARD_LIST_VIEW_STATE::NoState)
+		{
+			m_eViewState = E_CARD_LIST_VIEW_STATE::Dragging;
+		}
+		if (nManhattan > CARD_DRAG_DISTANCE_DIP)
+		{
+			// pressedIndex 를 비우지 않으면 이어지는 release 명령이 다중 선택을 한 장으로 접는다.
+			m_bDragConsumedPress = true;
+			m_PressedRow.reset();
+			m_bPressedAlreadySelected = false;
+			m_eViewState = E_CARD_LIST_VIEW_STATE::NoState;
+		}
+	}
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnLButtonDown(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
+{
+	// WM_LBUTTONDBLCLK 도 이 핸들러로 온다 - Qt 는 mouseDoubleClickEvent 를 재정의하지 않으므로
+	// 더블클릭의 두 번째 press 도 평범한 press 이고 열기는 release 에서만 난다(오라클 N5).
+	this->observe_current_();
+	m_bFocusByMouse = true;
+	::SetFocus(this->m_hWnd);
+	m_bFocusByMouse = false;
+	::SetCapture(this->m_hWnd);
+	if (!m_pProjection) { return(0); }
+
+	const POINT Point = this->point_from_lparam_(_lParam);
+	const std::optional<std::size_t> nRow = this->row_at_point_(Point);
+	const bool bCtrl = (_wParam & MK_CONTROL) != 0;
+	const bool bShift = (_wParam & MK_SHIFT) != 0;
+	// 원본의 "수식키 없음" 은 Qt NoModifier 라 Alt 도 수식키로 센다(MK_* 에는 Alt 비트가 없다).
+	const bool bNoModifier = !bCtrl && !bShift && (::GetKeyState(VK_MENU) & 0x8000) == 0;
+	const bool bRowSelected = nRow && this->IsRowSelected(*nRow);
+	const std::optional<std::size_t> nOldCurrent = this->current_row_();
+
+	m_bPressActive = true;
+	m_PressPoint = Point;
+	m_PressedRow = nRow;
+	m_bPressOnEmpty = !nRow.has_value();
+	m_bPressedAlreadySelected = bRowSelected;
+	m_bCtrlDragSelect = !bRowSelected;
+	m_bDragConsumedPress = false;
+	m_bEmptyPress = !nRow && this->inside_viewport_(Point) && bNoModifier;
+	m_bEmptyPressMoved = false;
+	m_DragSnapshot.reset();
+	const domain::S_CARD* pCard = nRow ? m_pProjection->CardAt(*nRow) : nullptr;
+	if (pCard)
+	{
+		// S4 가 소비할 CAS 스냅샷이다 - S2 는 기록만 한다.
+		m_DragSnapshot = S_CARD_DRAG_SNAPSHOT{ pCard->sId, pCard->sCurrentRevisionId, Point };
+		// Qt setCurrentIndex(index, NoUpdate): press 는 현재만 옮기고 자동 스크롤은 끈다.
+		m_pProjection->SetCurrentCardId(pCard->sId);
+	}
+
+	S_CARD_SELECTION_INPUT Input{};
+	Input.eMode = m_pProjection->SelectionMode();
+	Input.ePhase = E_CARD_INPUT_PHASE::Press;
+	Input.bRowValid = nRow.has_value();
+	Input.bRowSelected = bRowSelected;
+	Input.bPressedAlreadySelected = bRowSelected;
+	Input.bSamePressedRow = true;
+	Input.bCtrl = bCtrl;
+	Input.bShift = bShift;
+	Input.bDragSelecting = m_eViewState == E_CARD_LIST_VIEW_STATE::DragSelecting;
+	const E_CARD_SELECTION_COMMAND eCommand = ResolveSelectionCommand(Input);
+	// Qt noSelectionOnMousePress - release 명령을 적용할지 가르는 문이다(spec §3.1.9 1).
+	m_bNoSelectionOnMousePress = eCommand == E_CARD_SELECTION_COMMAND::NoUpdate || !nRow;
+	this->apply_selection_command_(eCommand, E_CARD_INPUT_PHASE::Press, nRow, nOldCurrent, {});
+	this->observe_current_();
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnLButtonUp(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
+{
+	this->observe_current_();
+	const POINT Point = this->point_from_lparam_(_lParam);
+	const std::optional<std::size_t> nRow = this->row_at_point_(Point);
+	const bool bCtrl = (_wParam & MK_CONTROL) != 0;
+	const bool bShift = (_wParam & MK_SHIFT) != 0;
+	const bool bNoModifierNow = !bCtrl && !bShift && (::GetKeyState(VK_MENU) & 0x8000) == 0;
+
+	// 1. release 선택 명령은 press 가 아무 선택도 적용하지 않았을 때만 돈다. setState(NoState)
+	//    는 Qt 도 이 뒤라 고무줄 상태가 그대로 보인다(M13/M15 의 선택 유지).
+	if (m_pProjection && m_bPressActive && m_bNoSelectionOnMousePress)
+	{
+		S_CARD_SELECTION_INPUT Input{};
+		Input.eMode = m_pProjection->SelectionMode();
+		Input.ePhase = E_CARD_INPUT_PHASE::Release;
+		Input.bRowValid = nRow.has_value();
+		Input.bRowSelected = nRow && this->IsRowSelected(*nRow);
+		Input.bPressedAlreadySelected = m_bPressedAlreadySelected;
+		Input.bSamePressedRow = nRow == m_PressedRow;
+		Input.bCtrl = bCtrl;
+		Input.bShift = bShift;
+		Input.bDragSelecting = m_eViewState == E_CARD_LIST_VIEW_STATE::DragSelecting;
+		this->apply_selection_command_(ResolveSelectionCommand(Input), E_CARD_INPUT_PHASE::Release,
+			nRow, this->current_row_(), {});
+	}
+	// 2. 빈 영역 클릭 판정(원본 mouseReleaseEvent 의 술어 그대로).
+	const bool bEmptyAreaClicked = this->inside_viewport_(Point) && !nRow &&
+		m_bEmptyPress && !m_bEmptyPressMoved && bNoModifierNow;
+	const bool bDragConsumed = m_bDragConsumedPress;
+	const domain::S_CARD* pCard = (m_pProjection && nRow) ? m_pProjection->CardAt(*nRow) : nullptr;
+	const std::string sCardId = pCard ? pCard->sId : std::string{};
+
+	// 3. 상태 초기화 + 캡처 해제.
+	this->reset_press_state_();
+	if (::GetCapture() == this->m_hWnd) { ::ReleaseCapture(); }
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+
+	// 4~7. 빈 영역 신호 -> 드래그 소비 -> Ctrl/무효 행 -> 열기.
+	if (bEmptyAreaClicked && m_EmptyAreaClick) { m_EmptyAreaClick(); }
+	if (bDragConsumed || !pCard || bCtrl) { return(0); }
+	// 여는 카드는 press 한 행이 아니라 release 지점의 행이다(M15/M20).
+	if (m_OpenCard) { m_OpenCard(sCardId); }
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnRButtonDown(UINT, WPARAM, LPARAM _lParam, BOOL&)
+{
+	// 원본 _select_context_index: 미선택 행이면 그 행만 남기고, 선택된 행이면 선택을 유지한 채
+	// 현재만 옮긴다. 컨텍스트 메뉴 자체는 S4 소유라 여기서는 선택 조정만 한다.
+	this->observe_current_();
+	m_bFocusByMouse = true;
+	::SetFocus(this->m_hWnd);
+	m_bFocusByMouse = false;
+	if (!m_pProjection) { return(0); }
+	const std::optional<std::size_t> nRow = this->row_at_point_(this->point_from_lparam_(_lParam));
+	const domain::S_CARD* pCard = nRow ? m_pProjection->CardAt(*nRow) : nullptr;
+	if (!pCard) { return(0); }
+	const std::string sCardId = pCard->sId;
+	if (!this->IsRowSelected(*nRow))
+	{
+		m_pProjection->SelectVisibleCard(sCardId, domain::E_CARD_SELECTION_INTENT::Replace);
+	}
+	m_pProjection->SetCurrentCardId(sCardId);
+	this->set_anchor_(nRow);
+	m_ShiftBase = m_pProjection->SelectedCardIds();
+	this->observe_current_();
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL& _bHandled)
+{
+	this->reset_press_state_();
+	_bHandled = FALSE;
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnDeferred(UINT, WPARAM, LPARAM, BOOL&)
+{
+	if (m_Deferred.empty()) { return(0); }
+	std::function<void()> Callable = std::move(m_Deferred.front());
+	m_Deferred.erase(m_Deferred.begin());
+	if (Callable) { Callable(); }
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnChar(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
+{
+	// Qt keyboardSearch 의 modified 가드: 제어 문자와 Ctrl/Alt 조합은 검색에 실리지 않는다.
+	if (_wParam < 0x20 || (::GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
+		(::GetKeyState(VK_MENU) & 0x8000) != 0)
+	{
+		_bHandled = FALSE;
+		return(0);
+	}
+	this->observe_current_();
+	this->keyboard_search_(static_cast<wchar_t>(_wParam));
 	return(0);
 }
 
@@ -737,14 +1389,55 @@ LRESULT C_CARD_LIST::OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&)
 
 LRESULT C_CARD_LIST::OnKeyDown(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
 {
-	// 관측 계약: CardListHwnd() 에 WM_KEYDOWN(VK_RETURN) 을 보내면 카드가 열린다.
-	if (_wParam != VK_RETURN) { _bHandled = FALSE; return(0); }
-	if (m_Activate) { m_Activate(); }
-	return(0);
+	this->observe_current_();
+	switch (static_cast<int>(_wParam))
+	{
+	case VK_RETURN:
+		// 관측 계약: CardListHwnd() 에 WM_KEYDOWN(VK_RETURN) 을 보내면 카드가 열린다.
+		// 현재 카드가 없어도 소비한다(원본도 emit 뒤 accept 하고, 없으면 super 가 무시한다).
+		if (m_Activate) { m_Activate(); }
+		return(0);
+	case VK_DELETE:
+	{
+		std::vector<std::string> Ids =
+			m_pProjection ? m_pProjection->CopySelectionForCommand() : std::vector<std::string>{};
+		// 선택이 비었으면 원본도 super 로 흘린다 - 여기서는 소비하지 않는다.
+		if (Ids.empty()) { _bHandled = FALSE; return(0); }
+		if (m_Delete) { m_Delete(std::move(Ids)); }
+		return(0);
+	}
+	case VK_SPACE:
+		this->handle_space_key_();
+		return(0);
+	case VK_UP:
+	case VK_DOWN:
+	case VK_HOME:
+	case VK_END:
+	case VK_PRIOR:
+	case VK_NEXT:
+		this->handle_navigation_key_(static_cast<int>(_wParam));
+		return(0);
+	default:
+		// 좌우 방향키는 전 폭 행의 ListMode 에서 현재 인덱스를 그대로 돌려준다(K5) - 무동작이다.
+		_bHandled = FALSE;
+		return(0);
+	}
 }
 
-LRESULT C_CARD_LIST::OnFocusChanged(UINT, WPARAM, LPARAM, BOOL& _bHandled)
+LRESULT C_CARD_LIST::OnFocusChanged(UINT _uMessage, WPARAM, LPARAM, BOOL& _bHandled)
 {
+	// Qt QAbstractItemView::focusInEvent: 자기 마우스 press 가 아닌 포커스 진입에서 현재 행이
+	// 없으면 행 0 을 현재로 잡는다(선택은 건드리지 않는다 - 오라클 N3 의 start 행).
+	if (_uMessage == WM_SETFOCUS && !m_bFocusByMouse && m_pProjection &&
+		!m_bCurrentObserved && this->RowCount() > 0 && !this->current_row_())
+	{
+		const domain::S_CARD* pCard = m_pProjection->CardAt(0);
+		if (pCard)
+		{
+			m_pProjection->SetCurrentCardId(pCard->sId);
+			m_bCurrentObserved = true;
+		}
+	}
 	if (this->IsWindow()) { this->Invalidate(FALSE); }
 	_bHandled = FALSE;
 	return(0);
@@ -765,6 +1458,9 @@ LRESULT C_CARD_LIST::OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	m_bRecoveringDevice = false;
 	m_bTrackingMouse = false;
 	m_nHoverRow.reset();
+	if (::GetCapture() == this->m_hWnd) { ::ReleaseCapture(); }
+	this->reset_press_state_();
+	m_Deferred.clear();
 	_bHandled = FALSE;
 	return(0);
 }
@@ -788,6 +1484,8 @@ LRESULT C_CARD_LIST::OnListSetCurSel(UINT, WPARAM _wParam, LPARAM, BOOL&)
 	{
 		m_pProjection->SetCurrentCardId(std::nullopt);
 		m_pProjection->SetSelectedCardIds({});
+		m_sAnchorCardId.reset();
+		m_ShiftBase.clear();
 		if (this->IsWindow()) { this->Invalidate(FALSE); }
 		return(LB_ERR);
 	}
@@ -795,6 +1493,10 @@ LRESULT C_CARD_LIST::OnListSetCurSel(UINT, WPARAM _wParam, LPARAM, BOOL&)
 	const domain::S_CARD* pCard = m_pProjection->CardAt(static_cast<std::size_t>(nRow));
 	if (!pCard) { return(LB_ERR); }
 	m_pProjection->SelectVisibleCard(pCard->sId, domain::E_CARD_SELECTION_INTENT::Replace);
+	// Qt setCurrentIndex -> ClearAndSelect 경로와 같게 앵커·Shift 기준도 이 행으로 간다.
+	this->set_anchor_(static_cast<std::size_t>(nRow));
+	m_ShiftBase = { pCard->sId };
+	this->observe_current_();
 	this->EnsureVisible(static_cast<std::size_t>(nRow));
 	if (this->IsWindow()) { this->Invalidate(FALSE); }
 	return(nRow);

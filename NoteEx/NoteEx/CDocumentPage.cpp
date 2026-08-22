@@ -107,6 +107,8 @@ struct C_DOCUMENT_PAGE::S_STATE
 	C_CARD_LIST CardList;
 	C_DOCUMENT_PAGE::LeavePrompt LeavePrompt;
 	C_DOCUMENT_PAGE::ChangeNotifier Notifier;
+	// 보기 메뉴로 켠 다중 선택. Init 이 프로젝션을 만든 직후 다시 건다(새 창도 영속값에서 시작).
+	bool bMultiSelectionEnabled{ false };
 	bool bSynchronizing{ false };
 	bool bCleaned{ false };
 	bool bCardSaveFailed{ false };
@@ -195,7 +197,9 @@ struct C_DOCUMENT_PAGE::S_STATE
 			[&_sCardId](const app::S_DRAFT_RECOVERY_CANDIDATE& _Candidate) { return(_Candidate.Draft.sCardId == _sCardId); }));
 	}
 
-	bool open_card(const std::string& _sCardId, bool _bReplaceEditor)
+	// _bReveal=false 는 원본 card_open_requested -> _open_card 경로다(선택을 다시 잡지 않는다).
+	// 앱 주도 open_card/reveal_card 는 true 로 부른다.
+	bool open_card(const std::string& _sCardId, bool _bReplaceEditor, bool _bReveal = true)
 	{
 		if (sDraftId && sCurrentCardId == _sCardId) { ::SetFocus(hEditor); return(true); }
 		if (sDraftId && pOwner->RequestLeave() == app::E_LEAVE_RESULT::Denied) { return(false); }
@@ -211,9 +215,32 @@ struct C_DOCUMENT_PAGE::S_STATE
 		if (_bReplaceEditor) { this->set_editor_text(Opened.Session->sText); }
 		// 새로 만들어진 카드는 이 갱신 뒤에야 프로젝션에 들어온다 - 선택은 그 다음이다.
 		this->refresh_cards();
-		this->select_current_card_();
+		// 마우스 press·Enter 는 이미 현재 카드를 잡아 두었다 - 여기서 다시 선택하면 방금 만든
+		// 다중 선택이 한 장으로 접힌다(오라클 M5/M10 이 열기 뒤에도 선택을 유지한다).
+		if (_bReveal) { this->select_current_card_(); }
 		::SetFocus(hEditor);
 		return(true);
+	}
+
+	// 원본 _release_editor_session_if_card_removed(document_page.py:929~936) +
+	// card_editor.release_session_for_removed_card(:419~435).
+	void release_if_removed_()
+	{
+		if (!sDraftId) { return; }
+		const auto Session = pDraftCoordinator->Session(*sDraftId);
+		if (!Session || !Session->sCardId) { return; }
+		domain::S_CARD Card;
+		const auto eResult = pRepositories->GetCard(*Session->sCardId, &Card);
+		if (eResult == storage::E_REPO_RESULT::Ok && !Card.nDeletedAtUs) { return; }
+		// 원본은 보호 실패를 경고만 하고 계속한다.
+		if (Session->bDirty) { pOwner->Protect(); }
+		// CEILING: 원본은 _prepare_empty_surface() 실패 시 연결을 유지하지만 W3 첫 입력 모델에는
+		// NEW backing 초안이 없어 대응물이 없다 - 해제는 무조건 진행한다.
+		pDraftCoordinator->ReleaseSession(*sDraftId);
+		sDraftId.reset();
+		sCurrentCardId.reset();
+		FirstInput->ResetAfterAcceptedClose();
+		this->set_editor_text({});
 	}
 
 	bool synchronize_editor(domain::E_CAPTURE_OPERATION_SOURCE _eSource)
@@ -298,6 +325,8 @@ bool C_DOCUMENT_PAGE::Init(
 	State.LeavePrompt = std::move(_LeavePrompt);
 	State.Projection = std::make_unique<domain::C_CARD_LIST_PROJECTION>();
 	State.CardList.Bind(*State.Projection);
+	// 원본은 생성 시점에 apply_settings() 로 장치 설정을 건다 - 새 창도 영속된 값에서 시작한다.
+	State.Projection->SetMultiSelectionEnabled(State.bMultiSelectionEnabled);
 	State.FirstInput = std::make_unique<app::C_FIRST_INPUT_CAPTURE>(
 		_CardService, *State.Projection, State.sDocumentId);
 	// 원본은 생성 시점에 정책 미리보기 줄 수를 모델에 건다(document_page.py:89~111).
@@ -320,6 +349,12 @@ bool C_DOCUMENT_PAGE::Init(
 		return(false);
 	}
 	State.CardList.SetActivateHandler([&State]() { State.pOwner->OpenSelectedCard(); });
+	// 원본 card_open_requested -> _open_card: 신호 경로는 선택을 다시 잡지 않는다.
+	State.CardList.SetOpenCardHandler([&State](const std::string& _sCardId)
+		{ State.open_card(_sCardId, true, false); });
+	State.CardList.SetEmptyAreaClickHandler([&State]() { State.pOwner->OnEmptyAreaClicked(); });
+	State.CardList.SetDeleteHandler([&State](std::vector<std::string> _CardIds)
+		{ State.pOwner->DeleteCards(_CardIds); });
 	State.hHistory = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
 		WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
 		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_HISTORY), _hInstance, nullptr);
@@ -562,13 +597,80 @@ void C_DOCUMENT_PAGE::Layout()
 		(std::max)(1L, EditorClient.bottom - nTop), TRUE);
 }
 
+void C_DOCUMENT_PAGE::SetMultiSelectionEnabled(bool _bEnabled)
+{
+	m_pState->bMultiSelectionEnabled = _bEnabled;
+	if (!m_pState->Projection) { return; }
+	// 끌 때의 축소(현재가 선택돼 있으면 현재, 아니면 첫 선택)는 core 규칙이다(W2-0024/0025/0027).
+	m_pState->Projection->SetMultiSelectionEnabled(_bEnabled);
+	// 행을 잃은 앵커 정리와 다시 그리기를 함께 돈다.
+	m_pState->CardList.OnProjectionChanged();
+}
+
+bool C_DOCUMENT_PAGE::MultiSelectionEnabled() const
+{
+	return(m_pState->Projection && m_pState->Projection->MultiSelectionEnabled());
+}
+
+bool C_DOCUMENT_PAGE::OnEmptyAreaClicked()
+{
+	auto& State = *m_pState;
+	const HWND hEditor = State.hEditor;
+	if (!State.sDraftId)
+	{
+		// 빈 편집면에서는 닫기 게이트를 돌리지 않는다. 목록 press 가 가져간 포커스만 되돌린다.
+		::SetFocus(hEditor);
+		State.CardList.PostDeferred([hEditor]() { ::SetFocus(hEditor); });
+		return(true);
+	}
+	const auto Result = this->RequestLeave();
+	// 원본은 거부돼도 편집면 포커스를 확정한다(거부 경로는 CanLeave 안에서 이미 되돌렸다).
+	::SetFocus(hEditor);
+	State.CardList.PostDeferred([hEditor]() { ::SetFocus(hEditor); });
+	return(Result != app::E_LEAVE_RESULT::Denied);
+}
+
+bool C_DOCUMENT_PAGE::DeleteCards(const std::vector<std::string>& _CardIds)
+{
+	// 원본 뷰는 빈 튜플을 발행하지 않는다.
+	if (_CardIds.empty()) { return(false); }
+	auto& State = *m_pState;
+	// 원본 _can_run_destructive_command -> can_leave_editor(protect_now=True) 다.
+	// Protect() 는 세션이 없거나 깨끗하면 참을 돌려주고, CanLeave() 도 세션이 없으면 승인이다.
+	// CEILING: 원본은 여기서 빈 편집면 초안(_protect_empty_surface)도 보호하지만 W3 첫 입력
+	// 모델에는 연결 전 초안이 없어 대응물이 없다 - W6 보호/복구 조각에서 재판정한다.
+	if (!this->Protect()) { return(false); }
+	if (this->CanLeave() == app::E_LEAVE_RESULT::Denied) { return(false); }
+	for (const std::string& sCardId : _CardIds)
+	{
+		domain::S_CARD Deleted;
+		if (State.pCardService->SoftDelete(sCardId, std::nullopt, false, std::nullopt, &Deleted) !=
+			app::E_CARD_SERVICE_RESULT::Ok)
+		{
+			// 카드별 독립 트랜잭션이라 실패 전까지 지워진 분은 남는다.
+			// CEILING: 오류 대화상자는 W7 주변 UI(error reporter seam) 몫이다 - 여기서는 false 만 돌린다.
+			State.release_if_removed_();
+			State.refresh_cards();
+			State.notify_change();
+			return(false);
+		}
+	}
+	State.release_if_removed_();
+	// 프로젝션이 지워진 id 를 버리고 core 정규화가 선택에서도 뺀다 - 다시 선택하지 않는다.
+	State.refresh_cards();
+	State.notify_change();
+	// 원본은 삭제 뒤 포커스를 옮기지 않는다.
+	return(true);
+}
+
 bool C_DOCUMENT_PAGE::OpenSelectedCard()
 {
 	const std::optional<std::string>& sCurrent = m_pState->Projection->CurrentCardId();
 	if (!sCurrent || !m_pState->Projection->RowForCard(*sCurrent)) { return(false); }
 	// open_card 가 프로젝션의 현재 카드 문자열을 다시 쓰므로 참조로 넘기지 않는다.
 	const std::string sCardId = *sCurrent;
-	return(m_pState->open_card(sCardId, true));
+	// 원본 Enter 도 card_open_requested 를 거치므로 선택을 다시 잡지 않는다(K4 는 선택을 유지한다).
+	return(m_pState->open_card(sCardId, true, false));
 }
 
 bool C_DOCUMENT_PAGE::Save()

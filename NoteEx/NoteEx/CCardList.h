@@ -28,7 +28,14 @@ namespace d2d
 	class C_D2D_DEVICE;
 	class C_D2D_BRUSH_CACHE;
 }
-namespace pynote::core::domain { class C_CARD_LIST_PROJECTION; }
+// core 헤더를 여기서 읽지 않는다 - 이 헤더는 ATL/WTL 과 함께 #undef CreateEvent 앞에서
+// 읽히므로 core 타입이 TU 마다 다른 매크로 상태로 파싱되면 안 된다(S1 include 순서 계약).
+// 범위 있는 enum 의 불투명 선언은 기반 타입이 int 로 확정돼 멤버로 쓸 수 있다.
+namespace pynote::core::domain
+{
+	class C_CARD_LIST_PROJECTION;
+	enum class E_CARD_SELECTION_MODE;
+}
 
 // 원본 CardDelegate 의 클래스 상수를 그대로 옮긴 것이다(card_delegate.py:23~27, :70).
 inline constexpr int CARD_HORIZONTAL_INSET_DIP = 4;
@@ -155,12 +162,66 @@ struct S_CARD_LIST_FRAME
 	std::vector<S_CARD_LIST_ROW_FRAME> Rows;
 };
 
+// Qt QAbstractItemView 의 상태 기계 중 S2 가 쓰는 세 가지다. Dragging 은 S2 에서
+// 드래그 시작 전 단계일 뿐이고 S4 가 DoDragDrop 으로 본체를 채운다.
+enum class E_CARD_LIST_VIEW_STATE { NoState, DragSelecting, Dragging };
+
+enum class E_CARD_INPUT_PHASE { Press, Move, Release, Key };
+
+enum class E_CARD_SELECTION_COMMAND
+{
+	NoUpdate, ClearAndSelect, Select, Deselect, Toggle,
+	// Shift 범위(앵커에서 대상까지) / 고무줄 띠 치환 / Ctrl 고무줄 띠 토글.
+	SelectCurrent, BandReplace, BandToggle
+};
+
+// ResolveSelectionCommand 의 입력. Win32 호출 없는 순수 함수라 시험이 표 구동으로
+// 직접 부른다(spec §3.2.1).
+struct S_CARD_SELECTION_INPUT
+{
+	// 값 초기화는 Single(0) 이다 - 열거자 이름은 정의를 읽는 쪽에서만 쓴다.
+	pynote::core::domain::E_CARD_SELECTION_MODE eMode{};
+	E_CARD_INPUT_PHASE ePhase{ E_CARD_INPUT_PHASE::Press };
+	bool bRowValid{ false };
+	bool bRowSelected{ false };
+	bool bPressedAlreadySelected{ false };
+	bool bSamePressedRow{ false };
+	bool bCtrl{ false };
+	bool bShift{ false };
+	bool bDragSelecting{ false };
+	int nKey{ 0 };
+};
+
+// Qt QAbstractItemViewPrivate::selectionCommand 의 쌍둥이. 오라클 표(spec 부록 A)가
+// 단언이고 이 함수는 그 표를 재생산하는 규칙 집합이다.
+E_CARD_SELECTION_COMMAND ResolveSelectionCommand(const S_CARD_SELECTION_INPUT& _Input) noexcept;
+
+// 원본 _DragSnapshot(card_stream.py:283~296 press 분기) 자리다. S2 는 기록만 하고
+// S4(드래그 앤 드롭)가 소비한다.
+struct S_CARD_DRAG_SNAPSHOT
+{
+	std::string sCardId;
+	std::optional<std::string> sRevisionId{};
+	POINT PressPoint{};
+};
+
+// QApplication.startDragDistance() 실측값(오라클 [ENV]). SM_CXDRAG 가 아니다.
+inline constexpr int CARD_DRAG_DISTANCE_DIP = 10;
+// QApplication.keyboardInputInterval() 기본값(타입어헤드 검색 재시작 간격).
+inline constexpr std::uint64_t CARD_KEYBOARD_SEARCH_INTERVAL_MS = 400;
+// PostDeferred 가 자기 자신에게 보내는 사설 메시지(QTimer.singleShot(0, ...) 쌍둥이).
+// CApplication 은 다른 HWND 에서 WM_APP+20/21 을 쓰므로 충돌하지 않는다.
+inline constexpr UINT CARD_LIST_DEFERRED_MESSAGE = WM_APP + 0x41;
+
 class C_CARD_LIST final : public CWindowImpl<C_CARD_LIST>
 {
 public:
 	DECLARE_WND_CLASS_EX(L"NoteExCardList", CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW, -1)
 
 	using ActivateHandler = std::function<void()>;
+	using OpenCardHandler = std::function<void(const std::string&)>;
+	using EmptyAreaClickHandler = std::function<void()>;
+	using DeleteHandler = std::function<void(std::vector<std::string>)>;
 
 	C_CARD_LIST();
 	~C_CARD_LIST();
@@ -169,6 +230,10 @@ public:
 
 	void Bind(pynote::core::domain::C_CARD_LIST_PROJECTION& _Projection) noexcept;
 	void SetActivateHandler(ActivateHandler _Handler);
+	// 원본 card_open_requested / empty_area_clicked / cards_delete_requested 의 자리다.
+	void SetOpenCardHandler(OpenCardHandler _Handler);
+	void SetEmptyAreaClickHandler(EmptyAreaClickHandler _Handler);
+	void SetDeleteHandler(DeleteHandler _Handler);
 	// 디바이스·브러시 캐시·텍스트 엔진은 CApplication 소유다. 붙지 않으면 그리지 않고
 	// 나머지(행·LB 메시지·Enter·스크롤 산술)는 그대로 동작한다.
 	void AttachRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -177,6 +242,20 @@ public:
 
 	// 프로젝션 행 집합이 바뀐 뒤 호출한다 - 내용 높이·스크롤 클램프·스크롤바를 다시 잡는다.
 	void OnProjectionChanged();
+
+	// 묶인 프로젝션(Bind 전에는 nullptr). 페이지 수준 시험이 선택을 읽는 관측 seam 이다.
+	const pynote::core::domain::C_CARD_LIST_PROJECTION* Projection() const noexcept
+	{
+		return(m_pProjection);
+	}
+	// 클라이언트 픽셀 좌표의 행 판정(뷰포트 밖이면 nullopt). S4 도 이 자리를 다시 쓴다.
+	std::optional<std::size_t> HitTestRow(POINT _ClientPx) const;
+	E_CARD_LIST_VIEW_STATE ViewState() const noexcept { return(m_eViewState); }
+	// Shift 범위의 기준 행(Qt currentSelectionStartIndex). 카드 id 로 들고 있다가 행으로 푼다.
+	std::optional<std::size_t> AnchorRow() const;
+	bool IsRowSelected(std::size_t _nRow) const;
+	// QTimer.singleShot(0, ...) 의 네이티브 쌍둥이. 사설 메시지 도착 시 선입선출로 실행한다.
+	void PostDeferred(std::function<void()> _Callable);
 
 	std::size_t RowCount() const noexcept;
 	int LineSpacingDip() const;
@@ -204,7 +283,16 @@ public:
 		MESSAGE_HANDLER(WM_VSCROLL, OnVScroll)
 		MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
 		MESSAGE_HANDLER(WM_MOUSELEAVE, OnMouseLeave)
+		MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
+		// Qt 는 mouseDoubleClickEvent 를 재정의하지 않는다 - 두 번째 press 와 같다(오라클 N5).
+		MESSAGE_HANDLER(WM_LBUTTONDBLCLK, OnLButtonDown)
+		MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
+		MESSAGE_HANDLER(WM_RBUTTONDOWN, OnRButtonDown)
+		MESSAGE_HANDLER(WM_RBUTTONUP, OnRButtonUp)
+		MESSAGE_HANDLER(WM_CAPTURECHANGED, OnCaptureChanged)
 		MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
+		MESSAGE_HANDLER(WM_CHAR, OnChar)
+		MESSAGE_HANDLER(CARD_LIST_DEFERRED_MESSAGE, OnDeferred)
 		MESSAGE_HANDLER(WM_SETFOCUS, OnFocusChanged)
 		MESSAGE_HANDLER(WM_KILLFOCUS, OnFocusChanged)
 		MESSAGE_HANDLER(WM_SYSCOLORCHANGE, OnPaletteChanged)
@@ -225,7 +313,14 @@ public:
 	LRESULT OnVScroll(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnMouseMove(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnLButtonDown(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnLButtonUp(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnRButtonDown(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnRButtonUp(UINT, WPARAM, LPARAM, BOOL&) { return(0); }
+	LRESULT OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnKeyDown(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnChar(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnDeferred(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnFocusChanged(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnPaletteChanged(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL&);
@@ -247,6 +342,24 @@ private:
 	void invalidate_row_(std::optional<std::size_t> _nRow);
 	std::optional<std::size_t> row_at_dip_(int _nYdip) const;
 	std::optional<std::size_t> current_row_() const;
+	POINT point_from_lparam_(LPARAM _lParam) const noexcept;
+	bool inside_viewport_(POINT _Point) const;
+	std::optional<std::size_t> row_at_point_(POINT _Point) const;
+	// "현재 카드를 한 번이라도 본 적이 있는가" - Qt 의 currentIndexSet 근사(spec §3.1.2).
+	void observe_current_();
+	void set_anchor_(std::optional<std::size_t> _nRow);
+	void select_row_additive_(std::size_t _nRow);
+	void deselect_row_(std::size_t _nRow);
+	std::vector<std::string> band_rows_(int _nCursorYdip) const;
+	std::size_t page_row_(std::size_t _nCurrentRow, bool _bDown) const;
+	void apply_selection_command_(E_CARD_SELECTION_COMMAND _eCommand, E_CARD_INPUT_PHASE _ePhase,
+		std::optional<std::size_t> _nTargetRow, std::optional<std::size_t> _nOldCurrentRow,
+		const std::vector<std::string>& _Band);
+	void handle_navigation_key_(int _nKey);
+	void handle_space_key_();
+	void keyboard_search_(wchar_t _Char);
+	bool prefix_match_(std::size_t _nRow, const std::wstring& _sPrefix) const;
+	void reset_press_state_();
 	bool render_();
 	bool draw_text_(ID2D1DeviceContext* _pDc, IDWriteTextFormat* _pFormat,
 		ID2D1Brush* _pBrush, const S_DIP_RECT& _Rect, const std::wstring& _sText);
@@ -254,6 +367,9 @@ private:
 
 	pynote::core::domain::C_CARD_LIST_PROJECTION* m_pProjection{ nullptr };
 	ActivateHandler m_Activate;
+	OpenCardHandler m_OpenCard;
+	EmptyAreaClickHandler m_EmptyAreaClick;
+	DeleteHandler m_Delete;
 	d2d::C_D2D_DEVICE* m_pDevice{ nullptr };
 	d2d::C_D2D_BRUSH_CACHE* m_pBrushCache{ nullptr };
 	d2d::C_D2D_TEXT* m_pText{ nullptr };
@@ -273,4 +389,28 @@ private:
 	mutable int m_nLineSpacingDip{ 0 };
 	std::optional<std::size_t> m_nHoverRow{};
 	bool m_bTrackingMouse{ false };
+
+	// ---- 선택 입력 계층(S2). Qt QAbstractItemViewPrivate 의 press 기록에 대응한다. ----
+	E_CARD_LIST_VIEW_STATE m_eViewState{ E_CARD_LIST_VIEW_STATE::NoState };
+	POINT m_PressPoint{};
+	std::optional<std::size_t> m_PressedRow{};
+	bool m_bPressActive{ false };
+	bool m_bPressOnEmpty{ false };
+	bool m_bPressedAlreadySelected{ false };
+	bool m_bDragConsumedPress{ false };
+	// 원본 _empty_press_position 은 "수식키 없는 뷰포트 안 빈 영역 press" 만 기록한다.
+	bool m_bEmptyPress{ false };
+	bool m_bEmptyPressMoved{ false };
+	// Qt noSelectionOnMousePress - release 명령을 적용할지 가르는 문이다.
+	bool m_bNoSelectionOnMousePress{ false };
+	// Qt ctrlDragSelectionFlag: press 한 행이 선택돼 있지 않았으면 띠는 선택, 선택돼 있었으면 해제다.
+	bool m_bCtrlDragSelect{ true };
+	std::optional<std::string> m_sAnchorCardId{};
+	std::vector<std::string> m_ShiftBase;
+	std::optional<S_CARD_DRAG_SNAPSHOT> m_DragSnapshot{};
+	bool m_bFocusByMouse{ false };
+	bool m_bCurrentObserved{ false };
+	std::vector<std::function<void()>> m_Deferred;
+	std::wstring m_sSearchInput;
+	std::uint64_t m_nSearchTickMs{ 0 };
 };

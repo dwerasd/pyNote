@@ -148,6 +148,7 @@
 	<ClCompile Include="harness\src\window_layout_test.cpp" />
 	<ClCompile Include="harness\src\w3_shell_consumer_test.cpp" />
 	<ClCompile Include="harness\src\w4_card_list_test.cpp" />
+	<ClCompile Include="harness\src\w4_card_select_test.cpp" />
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
       <!-- 상류 원본이라 경고를 손대지 않는다. -->

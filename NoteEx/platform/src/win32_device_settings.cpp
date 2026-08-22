@@ -921,6 +921,11 @@ namespace pynote::platform
 		m_pState->Values[_sKey] = integer_value(_nValue);
 	}
 
+	void C_WIN32_DEVICE_SETTINGS::SetBool(const std::string& _sKey, bool _bValue)
+	{
+		m_pState->Values[_sKey] = bool_value(_bValue);
+	}
+
 	const std::string& C_WIN32_DEVICE_SETTINGS::IniPath() const { return(m_pState->sIniPath); }
 	const std::string& C_WIN32_DEVICE_SETTINGS::LastError() const { return(m_pState->sLastError); }
 }

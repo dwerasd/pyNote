@@ -42,6 +42,7 @@ namespace pynote::platform
 
 		int  GetInt(const std::string& _sKey, int _nDefault) const;
 		void SetInt(const std::string& _sKey, int _nValue);
+		void SetBool(const std::string& _sKey, bool _bValue);
 
 		const std::string& IniPath() const;
 		const std::string& LastError() const;

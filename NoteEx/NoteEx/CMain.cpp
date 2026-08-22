@@ -316,6 +316,12 @@ bool C_MAIN::refill_after_document_removal_()
 		DBGPRINT(L"재채움 페이지 생성에 실패했습니다");
 		return(false);
 	}
+	// 새 창·재채움 창은 영속된 다중 선택 값에서 시작한다(원본 apply_settings).
+	if (m_pApplication && m_hRuntimeMenu)
+	{
+		pynote::shell::SyncMultiSelection(
+			m_pApplication->Settings(), m_hRuntimeMenu, m_DocumentPage);
+	}
 	m_DocumentPage.SetChangeNotifier([this]() { this->on_page_content_changed_(); });
 	m_pApplication->PersistWindowState(m_Token, m_sWorkspaceId, m_sDocumentId);
 	this->update_title_();
@@ -458,6 +464,12 @@ LRESULT C_MAIN::OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 		return(-1);
 	}
 	m_DocumentListShell.Show();
+	// 새 창·재채움 창은 영속된 다중 선택 값에서 시작한다(원본 apply_settings).
+	if (m_pApplication && m_hRuntimeMenu)
+	{
+		pynote::shell::SyncMultiSelection(
+			m_pApplication->Settings(), m_hRuntimeMenu, m_DocumentPage);
+	}
 	// 카드 생성·저장 완료가 페이지 통지 콜백을 거쳐 앱 버스 발행으로 간다.
 	m_DocumentPage.SetChangeNotifier([this]() { this->on_page_content_changed_(); });
 	this->subscribe_change_bus_();
@@ -499,6 +511,13 @@ LRESULT C_MAIN::OnActivate(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
 	if (LOWORD(_wParam) != WA_INACTIVE && m_pApplication)
 	{
 		m_pApplication->NotifyWindowActivated(m_Token);
+		// 원본 sync_device_settings(WindowActivate): 다른 창이 바꾼 장치 설정을 이 창의
+		// 메뉴 표시와 카드 목록에 맞춘다. 단일 인스턴스라 설정 객체를 공유하므로 파일 재읽기는 없다.
+		if (m_hRuntimeMenu)
+		{
+			pynote::shell::SyncMultiSelection(
+				m_pApplication->Settings(), m_hRuntimeMenu, m_DocumentPage);
+		}
 	}
 	_bHandled = FALSE;
 	return(0);
@@ -585,7 +604,18 @@ LRESULT C_MAIN::OnReplace(WORD, WORD, HWND, BOOL&)
 
 LRESULT C_MAIN::OnCardList(WORD, WORD, HWND, BOOL&)
 {
-	m_DocumentPage.FocusCardList();
+	// 원본 _focus_card_list: 편집기가 입력기 자리를 차지하고 있으면 "목록으로 돌아가기" 는
+	// 곧 편집기 닫기다(RequestLeave 는 승인되면 끝에서 목록 포커스로 간다 - W3 계약).
+	switch (pynote::shell::ResolveCardListCommand(
+		m_DocumentPage.IsHistoryVisible(), m_DocumentPage.HasSession()))
+	{
+	case pynote::shell::E_CARD_LIST_COMMAND::RequestLeave:
+		m_DocumentPage.RequestLeave();
+		break;
+	default:
+		m_DocumentPage.FocusCardList();
+		break;
+	}
 	return(0);
 }
 
@@ -598,6 +628,16 @@ LRESULT C_MAIN::OnHistory(WORD, WORD, HWND, BOOL&)
 LRESULT C_MAIN::OnBack(WORD, WORD, HWND, BOOL&)
 {
 	m_DocumentPage.RequestLeave();
+	return(0);
+}
+
+LRESULT C_MAIN::OnMultiSelection(WORD, WORD, HWND, BOOL&)
+{
+	if (m_pApplication && m_hRuntimeMenu)
+	{
+		pynote::shell::ToggleMultiSelection(
+			m_pApplication->Settings(), m_hRuntimeMenu, m_DocumentPage);
+	}
 	return(0);
 }
 

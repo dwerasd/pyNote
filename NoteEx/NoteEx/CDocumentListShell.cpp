@@ -1,12 +1,17 @@
 ﻿#include "CDocumentListShell.h"
 
+#include "CDocumentPage.h"
 #include "Resource.h"
+#include "pynote/platform/win32_device_settings.h"
 
 #include <algorithm>
 
 namespace
 {
 	constexpr wchar_t DOCUMENT_SHELL_CLASS[] = L"NoteExDocumentListShell";
+
+	// D8 INI 스키마에 이미 있는 typed Bool 키다(win32_device_settings.cpp:755, 기본값 false).
+	constexpr char MULTI_SELECTION_KEY[] = "cards/multi_selection_enabled";
 
 	bool append(HMENU _hMenu, UINT _nFlags, UINT_PTR _nId, const wchar_t* _pszText)
 	{
@@ -62,6 +67,9 @@ HMENU pynote::shell::CreateRuntimeMenu()
 		!append(hView, MF_SEPARATOR, 0, nullptr) ||
 		!append(hView, MF_STRING, IDM_CARD_LIST, L"카드 목록\tCtrl+Shift+P") ||
 		!append(hView, MF_STRING, IDM_HISTORY, L"변경 이력\tCtrl+Shift+H") ||
+		// 원본 보기 메뉴 차례(main_window.py:931~936): 카드 목록, 변경 이력, 다중 선택, 줄바꿈, 집중.
+		// 원본 액션에 단축키가 없으므로 액셀러레이터 표(11개)도 그대로다.
+		!append(hView, MF_STRING | MF_UNCHECKED, IDM_MULTI_SELECTION, L"카드 다중 선택") ||
 		!append(hView, MF_STRING | MF_UNCHECKED, IDM_FOCUS_MODE, L"집중 모드\tF11") ||
 		!append(hHelp, MF_GRAYED, IDM_FIRST_RUN_GUIDE, L"처음 사용 안내") ||
 		!append(hHelp, MF_GRAYED, IDM_DATA_LOCATION, L"데이터 위치 표시") ||
@@ -126,6 +134,55 @@ bool pynote::shell::ApplyFocusMode(HWND _hMain, HMENU _hRuntimeMenu, HWND _hStat
 		MF_BYCOMMAND | (_bEnabled ? MF_CHECKED : MF_UNCHECKED));
 	::DrawMenuBar(_hMain);
 	return(true);
+}
+
+bool pynote::shell::ReadMultiSelectionSetting(
+	const pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings)
+{
+	bool bEnabled = false;
+	return(_Settings.GetBool(MULTI_SELECTION_KEY, &bEnabled) && bEnabled);
+}
+
+bool pynote::shell::ApplyMultiSelectionMenuState(HMENU _hRuntimeMenu, bool _bEnabled)
+{
+	const HMENU hViewMenu = command_menu(_hRuntimeMenu, IDM_MULTI_SELECTION);
+	if (!hViewMenu) { return(false); }
+	return(::CheckMenuItem(hViewMenu, IDM_MULTI_SELECTION,
+		MF_BYCOMMAND | (_bEnabled ? MF_CHECKED : MF_UNCHECKED)) != static_cast<DWORD>(-1));
+}
+
+bool pynote::shell::SyncMultiSelection(
+	const pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings, HMENU _hRuntimeMenu,
+	::C_DOCUMENT_PAGE& _Page)
+{
+	const bool bEnabled = pynote::shell::ReadMultiSelectionSetting(_Settings);
+	const bool bMenu = pynote::shell::ApplyMultiSelectionMenuState(_hRuntimeMenu, bEnabled);
+	_Page.SetMultiSelectionEnabled(bEnabled);
+	return(bMenu);
+}
+
+std::optional<bool> pynote::shell::ToggleMultiSelection(
+	pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings, HMENU _hRuntimeMenu,
+	::C_DOCUMENT_PAGE& _Page)
+{
+	const bool bEnabled = !pynote::shell::ReadMultiSelectionSetting(_Settings);
+	_Settings.SetBool(MULTI_SELECTION_KEY, bEnabled);
+	// 다른 창은 활성화될 때 이 값을 다시 읽으므로 지금 파일로 민다. 쓰기가 실패해도
+	// 이 프로세스의 적용은 건너뛰지 않는다(원본 동등) - 실패는 Settings.LastError() 에 남는다.
+	static_cast<void>(_Settings.Sync());
+	if (!pynote::shell::SyncMultiSelection(_Settings, _hRuntimeMenu, _Page))
+	{
+		return(std::nullopt);
+	}
+	return(bEnabled);
+}
+
+pynote::shell::E_CARD_LIST_COMMAND pynote::shell::ResolveCardListCommand(
+	bool _bHistoryVisible, bool _bHasSession)
+{
+	// mode_stack 은 편집 작업면과 이력 두 위젯뿐이라 "이력이 안 보임" = "편집 작업면이 보임" 이다.
+	return(!_bHistoryVisible && _bHasSession ?
+		E_CARD_LIST_COMMAND::RequestLeave : E_CARD_LIST_COMMAND::FocusCardList);
 }
 
 C_DOCUMENT_LIST_SHELL::~C_DOCUMENT_LIST_SHELL() { this->Destroy(); }

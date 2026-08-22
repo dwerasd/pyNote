@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace pynote::core::application
 {
@@ -50,7 +51,7 @@ public:
 		std::string _sWorkspaceId, std::string _sDocumentId,
 		LeavePrompt _LeavePrompt = {});
 	void SetChangeNotifier(ChangeNotifier _Notifier);
-	// 아래 둘은 Init 앜에 불러야 첫 프레임부터 그려진다. 서비스가 없으면 목록은
+	// 아래 둘은 Init 앞에 불러야 첫 프레임부터 그려진다. 서비스가 없으면 목록은
 	// 그리지만 않고 행·메시지·Enter·스크롤은 그대로 동작한다.
 	void SetRenderServices(d2d::C_D2D_DEVICE* _pDevice,
 		d2d::C_D2D_BRUSH_CACHE* _pBrushCache, d2d::C_D2D_TEXT* _pText);
@@ -65,6 +66,14 @@ public:
 	bool PersistState(const std::optional<std::pair<int, int>>& _SplitSizesDip);
 	bool Cleanup();
 	void Layout();
+
+	// 보기 메뉴 토글의 소비자다. 축소 규칙(살아남는 한 장)은 core 프로젝션이 소유한다.
+	void SetMultiSelectionEnabled(bool _bEnabled);
+	bool MultiSelectionEnabled() const;
+	// 원본 _close_editor_on_empty_click(document_page.py:263~275). 마우스 없이도 몰 수 있게 공개다.
+	bool OnEmptyAreaClicked();
+	// 원본 _delete_cards(document_page.py:795~813) - 파괴적 명령 사전 점검을 거쳐 순서대로 지운다.
+	bool DeleteCards(const std::vector<std::string>& _CardIds);
 
 	bool OpenSelectedCard();
 	bool Save();

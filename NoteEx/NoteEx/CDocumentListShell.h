@@ -3,9 +3,14 @@
 #include <windows.h>
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 class C_DOCUMENT_LIST_SHELL;
+// 전역 선언만 둔다 - 이 헤더를 읽는 W3/W4 시험 TU 의 include 순서(CreateEvent 매크로
+// 계약)를 건드리지 않기 위해 실제 헤더는 .cpp 에서만 읽는다.
+class C_DOCUMENT_PAGE;
+namespace pynote::platform { class C_WIN32_DEVICE_SETTINGS; }
 
 namespace pynote::shell
 {
@@ -18,6 +23,23 @@ namespace pynote::shell
 	// 의미대로 창 수준 단축키가 닿지 않는다).
 	bool RouteFrameMessage(MSG* _pMessage, HWND _hFrame,
 		const std::function<bool(MSG*)>& _PreTranslate, HACCEL _hAccelerator);
+
+	// ---- 카드 다중 선택(군 D). 원본 MainWindow 의 설정-메뉴-목록 3자 배선에 대응한다. ----
+	// 원본 _multi_selection_setting(main_window.py:1328~1335).
+	bool ReadMultiSelectionSetting(const pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings);
+	// 원본 multi_selection_action.setChecked(신호 차단) - 표시만 맞춘다.
+	bool ApplyMultiSelectionMenuState(HMENU _hRuntimeMenu, bool _bEnabled);
+	// 원본 sync_device_settings 의 소비자 절반: 설정값 -> 메뉴 체크 + 목록 선택 모드.
+	bool SyncMultiSelection(const pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings,
+		HMENU _hRuntimeMenu, ::C_DOCUMENT_PAGE& _Page);
+	// 원본 _set_multi_selection: 값을 뒤집어 저장·sync 한 뒤 이 창에 적용한다.
+	std::optional<bool> ToggleMultiSelection(pynote::platform::C_WIN32_DEVICE_SETTINGS& _Settings,
+		HMENU _hRuntimeMenu, ::C_DOCUMENT_PAGE& _Page);
+
+	// 원본 _focus_card_list(main_window.py:1176~1188): 편집기가 입력기 자리를 차지하고 있으면
+	// "목록으로 돌아가기" 는 곧 편집기 닫기다.
+	enum class E_CARD_LIST_COMMAND { RequestLeave, FocusCardList };
+	E_CARD_LIST_COMMAND ResolveCardListCommand(bool _bHistoryVisible, bool _bHasSession);
 }
 
 class C_DOCUMENT_LIST_SHELL final
