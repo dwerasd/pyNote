@@ -12,6 +12,7 @@ import hashlib
 import html
 import platform
 import re
+import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -32,6 +33,10 @@ MATRIX_END = "<!-- CAPABILITY-MATRIX-END -->"
 UNCERTAIN_BEGIN = "<!-- UNCERTAIN-LINKS-BEGIN -->"
 UNCERTAIN_END = "<!-- UNCERTAIN-LINKS-END -->"
 VALID_OWNER = re.compile(r"W[0-7]\Z")
+SMOKE_GATE = (
+    "pwsh -NoProfile -File tools\\gates\\multiwindow_lifecycle_smoke.ps1 "
+    "-Executable x64\\ReleaseMD\\NoteEx.exe"
+)
 
 
 @dataclass(frozen=True)
@@ -415,6 +420,31 @@ def parse_uncertain(matrix_text: str) -> list[UncertainLink]:
     return result
 
 
+def allowed_gates(probe_id: str) -> tuple[str, str, str]:
+    """gate 명령 허용 3형 — 이름형(W2 관례)·태그형(W3 관례)·스모크형(고정 문자열).
+
+    이름형은 케이스 이름이 probe ID 와 정확히 같을 때, 태그형은 닫는 케이스에
+    probe ID 태그가 붙어 있을 때 쓴다. 스모크형은 Catch2 케이스 없이 스모크
+    술어로만 닫는 행의 고정 명령이며 어느 술어인지는 완료 증거 열이 밝힌다.
+    """
+    return (
+        f'x64\\ReleaseMD\\NoteExTests.exe "{probe_id}"',
+        f'x64\\ReleaseMD\\NoteExTests.exe "[{probe_id}]"',
+        SMOKE_GATE,
+    )
+
+
+GATE_FORM_NAMES = ("이름형", "태그형", "스모크형")
+
+
+def gate_form(gate: str, probe_id: str) -> str | None:
+    """허용 3형 중 어느 형인지 — 허용 목록 밖이면 None(= GATE_MISMATCH)."""
+    for name, allowed in zip(GATE_FORM_NAMES, allowed_gates(probe_id)):
+        if gate == allowed:
+            return name
+    return None
+
+
 def validate_rows(expected: list[SourceRow], actual: list[MatrixRow]) -> list[str]:
     problems: list[str] = []
     expected_by_id = {row.row_id: row for row in expected}
@@ -470,9 +500,68 @@ def validate_rows(expected: list[SourceRow], actual: list[MatrixRow]) -> list[st
         expected_probe = row.row_id.replace("CAP-", "WTL-CAP-")
         if row.probe_id and row.probe_id != expected_probe:
             problems.append(f"PROBE_MISMATCH: 안정 probe/시험 ID가 다르다: {row.row_id}")
-        expected_gate = f'x64\\ReleaseMD\\NoteExTests.exe "{expected_probe}"'
-        if row.gate and row.gate != expected_gate:
+        if row.gate and gate_form(row.gate, expected_probe) is None:
             problems.append(f"GATE_MISMATCH: gate 명령이 다르다: {row.row_id}")
+    return problems
+
+
+def listed_selectors(tests_exe: Path) -> tuple[set[str], set[str]]:
+    """시험 실행본이 실제로 등록한 (태그, 케이스 이름) 집합을 읽는다.
+
+    기본 `--list-tests` 출력은 긴 이름을 80열에서 접어 첫 줄만 이름처럼 보인다.
+    `--verbosity quiet` 는 한 줄에 이름 하나를 접지 않고 낸다. 케이스 이름은
+    CP949 로 나오고 한국어가 섞이므로 errors="replace" 로 읽는다 — 대조는 ASCII
+    probe ID 로만 하므로 대체 문자가 판정을 바꾸지 않는다.
+    """
+    exe = tests_exe.resolve()
+    cwd = exe.parents[2] if len(exe.parents) >= 3 else exe.parent
+
+    def listing(arguments: list[str]) -> str:
+        try:
+            result = subprocess.run(
+                [str(exe), *arguments],
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except OSError as exc:
+            raise MatrixError(f"시험 실행본을 실행할 수 없다: {exe}: {exc}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.decode("cp949", errors="replace").strip()
+            raise MatrixError(f"시험 실행본 rc={result.returncode}: {detail}")
+        return result.stdout.decode("cp949", errors="replace")
+
+    tags = set(re.findall(r"\[([^\[\]]+)\]", listing(["--list-tags"])))
+    names = {
+        line.strip()
+        for line in listing(["--list-tests", "--verbosity", "quiet"]).splitlines()
+        if line.strip()
+    }
+    if not tags or not names:
+        raise MatrixError(f"시험 실행본이 태그·케이스를 하나도 등록하지 않았다: {exe}")
+    return tags, names
+
+
+def validate_selectors(matrix: list[MatrixRow], tags: set[str], names: set[str]) -> list[str]:
+    """완료 증거가 `PASS` 인 행의 gate 선택자가 실제로 케이스를 고르는지 본다.
+
+    스모크형은 Catch2 선택자가 아니므로 대상이 아니다 — 술어 실재는 스모크
+    실행이 소유한다. 허용 목록 밖(형 판별 불가) 행은 이미 GATE_MISMATCH 다.
+    """
+    problems: list[str] = []
+    for row in matrix:
+        if not row.evidence.startswith("PASS"):
+            continue
+        expected_probe = row.row_id.replace("CAP-", "WTL-CAP-")
+        form = gate_form(row.gate, expected_probe)
+        empty = (form == "태그형" and expected_probe not in tags) or (
+            form == "이름형" and expected_probe not in names
+        )
+        if empty:
+            problems.append(
+                f"GATE_SELECTOR_EMPTY: gate 선택자가 케이스를 고르지 못한다: {row.row_id}"
+            )
     return problems
 
 
@@ -593,6 +682,21 @@ def run_self_test(source: Path) -> int:
         return 1
     print(f"PASS  정상 표본 수용({len(good)}행, uncertain {len(links)}행)")
 
+    failed = False
+    # 허용 목록 개정이 정상 표본을 거부하지 않는지 — 돌연변이 거부와 짝이 되는 반대 방향이다.
+    acceptances = (
+        ("태그형", f'x64\\ReleaseMD\\NoteExTests.exe "[{good[0].probe_id}]"'),
+        ("스모크형", SMOKE_GATE),
+    )
+    for name, gate in acceptances:
+        sample = _replace_matrix_row(good, 0, gate=gate)
+        problems = validate(expected, sample, links)
+        if problems:
+            failed = True
+            print(f"FAIL  허용 형식 수용: {name}; problems={problems}")
+        else:
+            print(f"PASS  허용 형식 수용: {name}")
+
     mutations: list[tuple[str, str, Callable[[], tuple[list[MatrixRow], list[UncertainLink]]]]] = [
         ("누락", "MISSING:", lambda: (good[1:], links)),
         ("중복", "DUPLICATE:", lambda: ([good[0], *good], links)),
@@ -658,7 +762,6 @@ def run_self_test(source: Path) -> int:
             ),
         ),
     ]
-    failed = False
     for name, expected_reason, make_bad in mutations:
         bad_rows, bad_links = make_bad()
         problems = validate(expected, bad_rows, bad_links)
@@ -687,11 +790,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--source", type=Path)
     parser.add_argument("--matrix", type=Path)
+    parser.add_argument("--tests-exe", type=Path)
     args = parser.parse_args(argv)
 
     if args.self_test:
-        if args.source or args.matrix:
-            parser.error("--self-test는 --source/--matrix와 함께 쓰지 않는다")
+        if args.source or args.matrix or args.tests_exe:
+            parser.error("--self-test는 --source/--matrix/--tests-exe와 함께 쓰지 않는다")
         repo_root = Path(__file__).resolve().parents[3]
         return run_self_test(repo_root / "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md")
     if args.source is None or args.matrix is None:
@@ -706,6 +810,9 @@ def main(argv: list[str] | None = None) -> int:
         matrix = parse_matrix(matrix_text)
         uncertain = parse_uncertain(matrix_text)
         problems = validate(expected, matrix, uncertain)
+        if args.tests_exe is not None:
+            tags, names = listed_selectors(args.tests_exe)
+            problems += validate_selectors(matrix, tags, names)
     except (OSError, MatrixError) as exc:
         print(f"환경/입력 오류: {exc}", file=sys.stderr)
         return 2
@@ -719,6 +826,8 @@ def main(argv: list[str] | None = None) -> int:
         f"통과: source SHA-256={digest}, capability {len(matrix)}행 원순서·내용·owner·필수 열 일치, "
         f"uncertain {len(uncertain)}행 연결 완비"
     )
+    if args.tests_exe is not None:
+        print(f"gate 선택자 교차 검증: 완료 증거 PASS 행 전건 실재 ({args.tests_exe})")
     print(f"runtime: Python {platform.python_version()} / {platform.platform()}")
     return 0
 

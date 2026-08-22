@@ -177,7 +177,7 @@ TEST_CASE("PLAN-W3-0043 document creation publish composes exact empty document 
 }
 
 TEST_CASE("PLAN-W3-0045 page content publish composes exact card and character status",
-	"[W3-settings-bus-status][PLAN-W3-0045]")
+	"[W3-settings-bus-status][PLAN-W3-0045][WTL-CAP-FI-036]")
 {
 	C_POLICY_FIXTURE Fixture;
 	const std::string sDocumentId = Fixture.CreateDocument("korean document");
@@ -243,7 +243,7 @@ TEST_CASE("PLAN-W3-0047 empty window refill publish recomposes status from refil
 }
 
 TEST_CASE("PLAN-W3-0042 closed window unsubscribes and failing subscriber does not stop publish",
-	"[W3-settings-bus-status][PLAN-W3-0042]")
+	"[W3-settings-bus-status][PLAN-W3-0042][WTL-CAP-PL-012]")
 {
 	shell::C_DOCUMENT_CHANGE_BUS Bus;
 	std::vector<std::string> Calls;

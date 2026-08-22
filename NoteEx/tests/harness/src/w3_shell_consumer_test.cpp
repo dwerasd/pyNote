@@ -293,7 +293,7 @@ TEST_CASE("PLAN-W3-0025 actual document page creates opens saves and navigates",
 }
 
 TEST_CASE("PLAN-W3-0026 runtime menu accelerators and modeless search are wired",
-	"[W3-shell-spine][PLAN-W3-0026]")
+	"[W3-shell-spine][PLAN-W3-0026][WTL-CAP-FI-016]")
 {
 	HMENU hMenu = shell::CreateRuntimeMenu();
 	REQUIRE(hMenu != nullptr);
@@ -478,7 +478,7 @@ TEST_CASE("CAP-FI-026 both Back paths keep rejected dirty editor",
 }
 
 TEST_CASE("CAP-FI-027 F11 command preserves shell lifetime across reactivation",
-	"[W3-shell-spine][WTL-CAP-FI-027]")
+	"[W3-shell-spine][WTL-CAP-FI-027][WTL-CAP-PL-004]")
 {
 	TestWindow Main(pynote::harness::TestWindowOptions{ L"focus accelerator", 400, 300, true });
 	HMENU hMenu = shell::CreateRuntimeMenu();

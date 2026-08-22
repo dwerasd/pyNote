@@ -644,7 +644,7 @@ W0 계약(인자 없는 기동 → 제목 `NoteEx` → exe 옆 `.ini`)은 W3 셸
 
 ```powershell
 pwsh -NoProfile -File tools/gates/shell_smoke.ps1 -Database $env:TEMP\x\db\p.sqlite3 -LocalAppData $env:TEMP\x\local -IniPath $env:TEMP\x\local\pyNote\pyNote\NoteEx.ini -ExpectedTitle 'Note 1 — pyNote'
-pwsh -NoProfile -File tools/gates/run_t0_gates.ps1   # 13게이트 일괄, 셸 프로브 격리 루트 자동
+pwsh -NoProfile -File tools/gates/run_t0_gates.ps1   # 기본 13게이트 / -WithSmoke 14게이트(대화형 전용, W-단위 aggregate 종결 판정에 필수; -SmokeIdleSeconds 60 권장), 셸 프로브 격리 루트 자동
 ```
 
 ## 실패는 무슨 뜻인가
@@ -653,3 +653,100 @@ pwsh -NoProfile -File tools/gates/run_t0_gates.ps1   # 13게이트 일괄, 셸 �
 - 09 rc=1 `창 제목 불일치` — 제목 조립(`ComposeWindowTitle`) 또는 첫 문서 제목 규칙이 바뀐 것. `-ExpectedTitle` 을 바꾸는 것은 계약 개정이다(이 절 갱신 + 사용자 확인).
 - 09 rc=1 `INI 가 재생성되지 않았다` — INI 위치 계약이 바뀐 것(`-IniPath` 와 앱 D8 설정 경로 대조).
 - 11 rc=0 — INI 분기 판별력 상실(없는 경로를 줬는데 통과) — 게이트 결함.
+
+---
+
+# 다중 창 수명주기 스모크 게이트 (multiwindow_lifecycle_smoke.ps1 — T0 14, 옵트인)
+
+`shell_smoke.ps1` 이 창 하나의 기동·제목·종료·INI 를 보는 데 반해, 이 스모크는 실제 `NoteEx.exe` 를
+여러 번 띄워 **다중 창 수명주기 전체**를 37개 술어로 본다. 덮는 범위는 단일 인스턴스 라우팅, 비마지막
+닫기와 마지막 닫기, 재시작 복원(1창·2창), 강제 종료 후 재획득, D8 INI·사용자 기본 DB·레지스트리 불변,
+프로세스·임시 자산 잔여 0, PerMonitorV2 와 DPI, geometry 재설정·화면 밖 교정·창별 키, 첫 붙여넣기와
+카드 열기·저장, 찾기/바꾸기·이력·모달리스 검색·포커스 모드, 재시작 UI 상태 복원, 상태 표시줄·창 제목,
+기동 유지보수 백업이다. 출력 끝에 `PREDICATE <이름>=True|False` 37줄이 나오고 하나라도 False 면 rc=1 이다.
+`-Executable` 은 유일한 필수 인자다.
+
+## 왜 기본 목록이 아니라 옵트인인가
+
+이 스모크는 **전경 창을 잡아 실제 키 입력을 넣는다.** 같은 데스크톱에서 사람이 키보드를 만지고 있으면
+전경을 뺏겨 술어가 무더기로 False 가 된다 — 제품 결함이 아니라 관측 장치의 경합이다. 그래서 T0 일괄
+실행기의 기본 13게이트에는 넣지 않고 `-WithSmoke` 로만 켠다. 원격 세션·잠금 화면은
+`SetForegroundWindow` 권한이 없어 실행해도 의미가 없다(대화형 데스크톱 전용).
+
+`-SmokeIdleSeconds <초>` 를 주면 14번 실행 **직전** `GetLastInputInfo` 기준 사용자 유휴가 그 값에 이를
+때까지 5초 간격으로 기다린다(상한 `-SmokeIdleWaitMinutes`, 기본 10분). 상한을 넘겨도 **스킵하지 않고
+그대로 실행**하고 트랜스크립트에 `유휴 대기 상한 초과` 를 남긴다. 14번 상세에는 실행 직전 유휴 초,
+`query session` 활성 세션, 전경 창 hwnd·제목 3줄이 남는다 — 사후에 전경 경합인지 제품 결함인지를 이 3줄로
+가른다(유휴 조건 2/2 통과 실측 2026-08-22).
+
+## 실행
+
+```powershell
+pwsh -NoProfile -File tools\gates\multiwindow_lifecycle_smoke.ps1 -Executable x64\ReleaseMD\NoteEx.exe
+pwsh -NoProfile -File tools/gates/run_t0_gates.ps1 -WithSmoke -SmokeIdleSeconds 60   # 14게이트 일괄
+```
+
+## 실패는 무슨 뜻인가
+
+- 전경·포커스 계열 술어(`RuntimeMenuCommandsAndAcceleratorDispatch`·`ModelessSearchQueryFocus`·
+  `FindReplaceVisibilityAndFocus` 등)만 무더기 False — 전경 경합을 먼저 의심한다. 상세 3줄의 유휴 초와
+  전경 창을 보고 유휴를 확보해 재실행한다.
+- 술어 1~2개만 False — 그 계약의 제품 결함으로 다룬다. 술어 이름이 곧 계약 이름이다.
+- 술어를 지우거나 기대를 낮추는 것은 게이트 약화다. 37 술어 집합의 변경은 계약 개정이다(이 절 갱신 +
+  사용자 확인).
+
+---
+
+# capability 추적표 gate 명령 열 계약 (check_capability_matrix.py)
+
+추적표의 `gate 명령` 열은 **그 행 하나를 다시 닫는 명령**이다. 검사기는 행 ID 에서 파생한
+probe(`WTL-CAP-XX-NNN`)를 기준으로 아래 **3형만** 받고 그 밖은 `GATE_MISMATCH` 다.
+
+| 형 | 명령 | 언제 쓰나 |
+|---|---|---|
+| 이름형 | `x64\ReleaseMD\NoteExTests.exe "WTL-CAP-XX-NNN"` | 케이스 **이름 자체가** probe ID 일 때(W2 관례) |
+| 태그형 | `x64\ReleaseMD\NoteExTests.exe "[WTL-CAP-XX-NNN]"` | 닫는 케이스에 probe ID **태그**가 붙어 있을 때(W3 관례) |
+| 스모크형 | `pwsh -NoProfile -File tools\gates\multiwindow_lifecycle_smoke.ps1 -Executable x64\ReleaseMD\NoteEx.exe` | Catch2 케이스 없이 스모크 술어로만 닫는 행 |
+
+Catch2 는 `[` 로 시작하지 않는 토큰을 태그가 아니라 **이름 패턴**으로 받고, 와일드카드가 없으면 이름
+완전 일치다. 그래서 태그로만 닫는 행에 이름형을 적으면 0건을 골라 rc=2 로 끝난다 — 초록도 빨강도 아닌
+공허한 게이트다. 3형 분리가 그 공허를 막는다. 스모크형 행은 어느 술어로 닫았는지를 완료 증거 열에
+`PREDICATE <이름>` 으로 명시한다(명령 자체는 37 술어 전체를 돌린다).
+
+## 태그 부여 규약
+
+- probe ID 태그는 **그 capability 를 닫는 케이스**에 붙인다. 기존 태그·케이스 이름·본문은 그대로 두고
+  태그만 덧붙인다 — **케이스 이름 변경은 금지**다(이름이 다른 게이트·대장의 선택자다).
+- 한 케이스가 여러 행을 닫으면 태그를 여러 개 붙인다(예
+  `[W3-multi-window-lifecycle][WTL-CAP-FI-121][WTL-CAP-PL-021][WTL-CAP-PL-023][WTL-CAP-NC-032]`).
+- 한 행을 여러 케이스가 닫으면 그중 한 케이스에만 붙여도 선택자는 성립한다.
+- 두 capability 가 한 태그를 공유하면 한쪽이 회귀해도 다른 쪽 셀이 초록으로 남는다 — 행마다 자기 태그를 준다.
+
+## `--tests-exe` 교차 검증
+
+정적 검사는 열의 **문자열 형태**만 본다. 그 선택자가 실제로 케이스를 고르는지는 실행본이 있어야 안다.
+
+```powershell
+# 정적 — 행·순서·내용·owner·probe·필수 열·gate 형태
+python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md" --matrix "docs/20260819_2026_Sol_max_WTL포팅_capability추적표-01.md"
+# 정적 + 선택자 실재 교차 검증
+python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md" --matrix "docs/20260819_2026_Sol_max_WTL포팅_capability추적표-01.md" --tests-exe NoteEx\x64\ReleaseMD\NoteExTests.exe
+```
+
+- 대상 = **완료 증거 열이 `PASS` 로 시작하는 행**만. 미실시·이월 행은 아직 닫히지 않았으므로 제외한다.
+- 태그형은 `--list-tags` 에 `[probe]` 가, 이름형은 `--list-tests --verbosity quiet` 에 probe 와 같은 줄이
+  있어야 한다(기본 `--list-tests` 는 긴 이름을 80열에서 접어 오탐을 낸다). 스모크형은 Catch2 선택자가
+  아니므로 검사 대상이 아니다 — 술어 실재는 스모크 실행이 소유한다.
+- 실패 = `GATE_SELECTOR_EMPTY: gate 선택자가 케이스를 고르지 못한다: <행 ID>` (rc=1). 뜻은 "완료 증거는
+  PASS 라는데 그 명령으로는 아무 케이스도 돌지 않는다"이다.
+- `--tests-exe` 를 주지 않으면 종전과 같은 정적 검사만 하고 rc 의미도 그대로다.
+- **실행본이 낡으면 이 검사도 낡는다.** 태그를 소스에 넣고 빌드하지 않은 채 돌리면 새 태그가 전건
+  `GATE_SELECTOR_EMPTY` 로 뜬다 — 검사기 결함이 아니라 실행본과 소스의 시차다.
+
+## 이 열을 고치려면
+
+허용 목록 개정은 **게이트 의미 변경**이다. `check_capability_matrix.py` 의 `allowed_gates()` 를 고치는
+일은 이 절 갱신과 사용자 확인을 함께 거친다(이번 3형 허용의 근거 = 2026-08-22 사용자 `1A` 확정).
+`--self-test` 는 정상 표본 수용(`허용 형식 수용: 태그형`·`스모크형`)과 `gate 명령 변경 → GATE_MISMATCH`
+돌연변이 거부를 **양방향으로** 지킨다 — 형을 추가하면 그 두 방향을 함께 늘린다. 이름형은 W2 행이 쓰고
+있으므로 제거하지 않는다.

@@ -18,7 +18,11 @@ param(
     [string] $Prefix = 'T0G',
     [string] $MSBuild = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\amd64\MSBuild.exe',
     [string] $DumpBin = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\dumpbin.exe',
-    [string] $Python = ''
+    [string] $Python = '',
+    # 14번 스모크는 전경 창을 잡아 실입력을 넣으므로 기본 목록에서 뺀다(대화형 데스크톱 전용).
+    [switch] $WithSmoke,
+    [int] $SmokeIdleSeconds = 0,
+    [int] $SmokeIdleWaitMinutes = 10
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,9 +34,12 @@ $python    = if ($Python) { $Python } else { Join-Path $repoRoot '.venv\Scripts\
 if (-not $LogDir) { $LogDir = Join-Path $repoRoot 'scratchpad\orchestration\wtl-port\logs' }
 $gatesDir  = Join-Path $noteExDir 'tools\gates'
 $smoke     = Join-Path $gatesDir 'shell_smoke.ps1'
+$multiSmoke = Join-Path $gatesDir 'multiwindow_lifecycle_smoke.ps1'
 $outDir    = Join-Path $noteExDir 'x64\ReleaseMD'
 
-foreach ($p in @($MSBuild, $DumpBin, $python, $smoke)) {
+$required = @($MSBuild, $DumpBin, $python, $smoke)
+if ($WithSmoke) { $required += $multiSmoke }
+foreach ($p in $required) {
     if (-not (Test-Path -LiteralPath $p)) {
         Write-Output ("[오류] 필수 실행 파일·스크립트 없음: {0}" -f $p)
         exit 2
@@ -54,6 +61,57 @@ $shellTitle = 'Note 1 — pyNote'
 New-Item -ItemType Directory -Path $shellLocal -Force | Out-Null
 New-Item -ItemType Directory -Path (Split-Path -Parent $shellDb) -Force | Out-Null
 
+# 14번은 전경 창을 잡아 실입력을 넣는다 — 사용자가 키보드를 만지는 중이면 전경 경합으로 술어가
+# 무더기 실패한다. 유휴 대기와 아래 3줄 기록은 그 경합과 제품 결함을 사후에 가르는 장치다.
+if ($WithSmoke) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class T0GateInputProbe
+{
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetTickCount();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextW(IntPtr hWnd, StringBuilder text, int count);
+
+    public static double IdleSeconds()
+    {
+        LASTINPUTINFO info = new LASTINPUTINFO();
+        info.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+        if (!GetLastInputInfo(ref info)) { return -1.0; }
+        return (GetTickCount() - info.dwTime) / 1000.0;
+    }
+
+    public static IntPtr Foreground() { return GetForegroundWindow(); }
+
+    public static string ForegroundTitle()
+    {
+        IntPtr hWnd = GetForegroundWindow();
+        if (hWnd == IntPtr.Zero) { return string.Empty; }
+        StringBuilder text = new StringBuilder(512);
+        int length = GetWindowTextW(hWnd, text, text.Capacity);
+        return length > 0 ? text.ToString() : string.Empty;
+    }
+}
+'@
+}
+
 # id / 이름 / 작업 디렉터리 / 실행 파일 / 인자 / 기대 종료코드
 $gates = @(
     @{ id = '01'; name = 'ReleaseMD|x64 클린 리빌드';                cwd = $noteExDir; exe = $MSBuild; args = @('NoteEx.sln', '/t:Rebuild', '/p:Configuration=ReleaseMD;Platform=x64'); expect = 0 }
@@ -70,6 +128,9 @@ $gates = @(
     @{ id = '12'; name = '셸 프로브 known-bad: 실행 파일 부재';       cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $smoke, '-Exe', (Join-Path $outDir 'NoSuchBinary.exe')); expect = 2 }
     @{ id = '13'; name = '배포 의존성 dumpbin /dependents';           cwd = $noteExDir; exe = $DumpBin; args = @('/dependents', (Join-Path $outDir 'NoteEx.exe')); expect = 0 }
 )
+if ($WithSmoke) {
+    $gates += @{ id = '14'; name = '다중 창 수명주기 스모크 37 술어(대화형 전용)'; cwd = $noteExDir; exe = 'pwsh'; args = @('-NoProfile', '-File', $multiSmoke, '-Executable', (Join-Path $outDir 'NoteEx.exe')); expect = 0 }
+}
 
 $transcript = Join-Path $LogDir ("{0}_transcript.md" -f $Prefix)
 $rows = New-Object System.Collections.Generic.List[string]
@@ -88,6 +149,29 @@ $failed = 0
 foreach ($g in $gates) {
     $log = Join-Path $LogDir ("{0}_{1}.log" -f $Prefix, $g.id)
     if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+
+    $gateNotes = New-Object System.Collections.Generic.List[string]
+    if ($g.id -eq '14') {
+        $deadline = (Get-Date).AddMinutes($SmokeIdleWaitMinutes)
+        $bExceeded = $false
+        while ($SmokeIdleSeconds -gt 0 -and [T0GateInputProbe]::IdleSeconds() -lt $SmokeIdleSeconds) {
+            if ((Get-Date) -ge $deadline) { $bExceeded = $true; break }
+            Start-Sleep -Seconds 5
+        }
+        $dIdle = [T0GateInputProbe]::IdleSeconds()
+        $sSession = ((query session 2>&1) | Where-Object { $_ -match '^\s*>' } |
+            ForEach-Object { $_.ToString().Trim() }) -join ' / '
+        if (-not $sSession) { $sSession = '(query session 활성 세션 줄 없음)' }
+        $hForeground = [T0GateInputProbe]::Foreground()
+        $sForeground = [T0GateInputProbe]::ForegroundTitle()
+        $gateNotes.Add(('- 실행 직전 유휴 초: {0:0.0} (요구 {1}, 대기 상한 {2}분)' -f $dIdle, $SmokeIdleSeconds, $SmokeIdleWaitMinutes))
+        $gateNotes.Add(('- query session 활성 세션: `{0}`' -f $sSession))
+        $gateNotes.Add(('- 전경 창: hwnd=0x{0:X} 제목 `{1}`' -f [int64]$hForeground, $sForeground))
+        if ($bExceeded) {
+            $gateNotes.Add('- 유휴 대기 상한 초과 — 요구 유휴에 이르지 못한 채 그대로 실행했다(스킵 없음).')
+            Write-Output ('14 유휴 대기 상한 초과: 요구 {0}초 / 실측 {1:0.0}초' -f $SmokeIdleSeconds, $dIdle)
+        }
+    }
 
     $start = Get-Date
     Push-Location -LiteralPath $g.cwd
@@ -122,6 +206,7 @@ foreach ($g in $gates) {
     $detail.Add(('- 명령: `{0}`' -f ((@($g.exe) + $g.args) -join ' ')))
     $detail.Add(('- 기대 rc {0} / 실제 rc {1} / {2}' -f $g.expect, $rc, ($(if ($ok) { '일치' } else { '불일치' }))))
     $detail.Add(('- 로그: `{0}` SHA-256 `{1}`' -f $log, $hash))
+    foreach ($note in $gateNotes) { $detail.Add($note) }
     $detail.Add('')
 
     Write-Output ('{0} {1}: 기대 {2} / 실제 {3} / {4}' -f $g.id, $g.name, $g.expect, $rc, ($(if ($ok) { 'OK' } else { 'MISMATCH' })))

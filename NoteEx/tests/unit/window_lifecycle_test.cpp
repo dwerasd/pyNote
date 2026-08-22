@@ -46,7 +46,8 @@ TEST_CASE("registry enforces one document owner and active transitions", "[W3-mu
 	REQUIRE(Registry.Retire(Second));
 }
 
-TEST_CASE("restore filters ineligible duplicate owners and chooses recent unowned document", "[W3-multi-window-lifecycle]")
+TEST_CASE("restore filters ineligible duplicate owners and chooses recent unowned document",
+	"[W3-multi-window-lifecycle][WTL-CAP-FI-011][WTL-CAP-FI-012][WTL-CAP-PL-008]")
 {
 	std::vector<domain::S_WORKSPACE_WINDOW> Records{
 		{ "window-1", { "eligible-1", "trashed" }, "eligible-1", 1 },
@@ -63,7 +64,8 @@ TEST_CASE("restore filters ineligible duplicate owners and chooses recent unowne
 	REQUIRE(application::ChooseRecentUnownedDocument(Documents, { "older", "owned", "recent" }) == std::nullopt);
 }
 
-TEST_CASE("single close follows exact order and cancellation is non-mutating", "[W3-multi-window-lifecycle]")
+TEST_CASE("single close follows exact order and cancellation is non-mutating",
+	"[W3-multi-window-lifecycle][WTL-CAP-FI-120][WTL-CAP-PL-022]")
 {
 	application::C_WINDOW_LIFECYCLE Lifecycle;
 	std::vector<std::string> Log;
@@ -96,7 +98,8 @@ TEST_CASE("dirty leave denial and approved save paths are distinct", "[W3-multi-
 	REQUIRE(Log[2] == "persist:2");
 }
 
-TEST_CASE("application quit persists all windows before any cleanup", "[W3-multi-window-lifecycle]")
+TEST_CASE("application quit persists all windows before any cleanup",
+	"[W3-multi-window-lifecycle][WTL-CAP-FI-121][WTL-CAP-PL-021][WTL-CAP-PL-023][WTL-CAP-NC-032]")
 {
 	application::C_WINDOW_LIFECYCLE Blocked;
 	std::vector<std::string> BlockedLog;
@@ -114,7 +117,7 @@ TEST_CASE("application quit persists all windows before any cleanup", "[W3-multi
 		"release:1", "destroy:1", "release:2", "destroy:2" });
 }
 
-TEST_CASE("cleanup false and exception do not skip later participants", "[W3-multi-window-lifecycle]")
+TEST_CASE("cleanup false and exception do not skip later participants", "[W3-multi-window-lifecycle][WTL-CAP-PL-025]")
 {
 	application::C_WINDOW_LIFECYCLE Lifecycle;
 	std::vector<std::string> Log;
@@ -130,7 +133,8 @@ TEST_CASE("cleanup false and exception do not skip later participants", "[W3-mul
 	REQUIRE(Lifecycle.CleanupFailures() == Expected);
 }
 
-TEST_CASE("non-last close deletes restoration while last and full quit preserve it", "[W3-multi-window-lifecycle]")
+TEST_CASE("non-last close deletes restoration while last and full quit preserve it",
+	"[W3-multi-window-lifecycle][WTL-CAP-PL-024][WTL-CAP-NC-035]")
 {
 	std::vector<std::string> NonLastLog;
 	application::C_WINDOW_LIFECYCLE NonLast;

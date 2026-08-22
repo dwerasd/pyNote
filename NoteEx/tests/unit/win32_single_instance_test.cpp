@@ -164,7 +164,8 @@ namespace
 	}
 }
 
-TEST_CASE("W3-I1-001 startup database arguments and parent identity are exact", "[W3-single-instance]")
+TEST_CASE("W3-I1-001 startup database arguments and parent identity are exact",
+	"[W3-single-instance][WTL-CAP-FI-002][WTL-CAP-FI-004][WTL-CAP-PL-001]")
 {
 	const auto Database = database_path(L"유니코드-부모");
 	std::wstring sDatabase = Database.native();
@@ -253,7 +254,7 @@ TEST_CASE("W3-I1-002 mutex and pipe use the current-user protected DACL", "[W3-s
 	Primary.Close();
 }
 
-TEST_CASE("W3-I1-003 one primary routes a secondary new-window request", "[W3-single-instance]")
+TEST_CASE("W3-I1-003 one primary routes a secondary new-window request", "[W3-single-instance][WTL-CAP-FI-005]")
 {
 	const auto Database = database_path(L"routing");
 	C_SINGLE_INSTANCE Primary;
@@ -270,7 +271,7 @@ TEST_CASE("W3-I1-003 one primary routes a secondary new-window request", "[W3-si
 	Primary.Close();
 }
 
-TEST_CASE("W3-I1-004 partial and unknown newline frames are handled exactly", "[W3-single-instance]")
+TEST_CASE("W3-I1-004 partial and unknown newline frames are handled exactly", "[W3-single-instance][WTL-CAP-PL-003]")
 {
 	C_SINGLE_INSTANCE Primary;
 	REQUIRE(Primary.Acquire(database_path(L"framing").native()) == E_ACQUIRE_RESULT::Primary);
@@ -283,7 +284,8 @@ TEST_CASE("W3-I1-004 partial and unknown newline frames are handled exactly", "[
 	Primary.Close();
 }
 
-TEST_CASE("W3-I1-005 slow live owner retries while unavailable live owner fails closed", "[W3-single-instance]")
+TEST_CASE("W3-I1-005 slow live owner retries while unavailable live owner fails closed",
+	"[W3-single-instance][WTL-CAP-FI-007][WTL-CAP-PL-002]")
 {
 	const auto SlowDatabase = database_path(L"slow-owner");
 	const auto SlowNames = instance_names(SlowDatabase);
@@ -356,7 +358,7 @@ TEST_CASE("W3-I1-005 slow live owner retries while unavailable live owner fails 
 	Reacquired.Close();
 }
 
-TEST_CASE("W3-I1-006 close releases server and mutex for reacquisition", "[W3-single-instance]")
+TEST_CASE("W3-I1-006 close releases server and mutex for reacquisition", "[W3-single-instance][WTL-CAP-PL-026]")
 {
 	const auto Database = database_path(L"reacquire");
 	C_SINGLE_INSTANCE First;
