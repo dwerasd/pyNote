@@ -750,3 +750,23 @@ python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_212
 `--self-test` 는 정상 표본 수용(`허용 형식 수용: 태그형`·`스모크형`)과 `gate 명령 변경 → GATE_MISMATCH`
 돌연변이 거부를 **양방향으로** 지킨다 — 형을 추가하면 그 두 방향을 함께 늘린다. 이름형은 W2 행이 쓰고
 있으므로 제거하지 않는다.
+
+---
+
+# 다중 창 수명주기 스모크 — `ActualPageChildWindows` 카드 목록 클래스명 기대값 개정 (W4 S1, 2026-08-22)
+
+- 변경: `multiwindow_lifecycle_smoke.ps1` 의 `ActualPageChildWindows` 술어에서 카드 목록(컨트롤 ID 2101)의
+  클래스명 기대값을 `ListBox` → `NoteExCardList` 로 바꿨다(853행 토큰 1건). 이력 목록(2105)의 `ListBox`
+  기대값과 나머지 36 술어는 불변이다. 술어의 의미(자식 2101~2106 실재·클래스·가시성)는 그대로이고
+  기대값만 바뀐다(37 술어 집합 불변).
+- 근거: W4 S1 이 W3 의 `LISTBOX` 자리표시자를 자작 `CWindowImpl` 컨트롤 `C_CARD_LIST`(등록 클래스
+  `NoteExCardList`, `NoteEx/NoteEx/CCardList.h`)로 교체했다 — 자작 컨트롤은 시스템 클래스명 `ListBox` 로
+  등록될 수 없다. 기대값 변경은 게이트 의미 변경이므로 사용자 확인을 거쳤다(2026-08-22 08:11 전용 봇 ask
+  회신 `승인 NoteExCardList + 1A 태그형(추천)`; W4 지시서 §2 결정 2).
+- LB 호환: 자작 컨트롤이 `LB_GETCOUNT`·`LB_GETCURSEL`·`LB_SETCURSEL`·`LB_GETTOPINDEX`·`LB_SETTOPINDEX` 를
+  같은 메시지 번호·정수 반환 규약(`LB_ERR` 포함)으로 구현하므로 프로세스 밖 메시지 프로브 술어 3건
+  (`FirstPasteCreatesConnectedCard`·`ListEnterOpensStoredCard`·`RestartRestoresPageUiState`)은 개정 없이
+  통과한다(W4 지시서 §2 결정 1; 전용 프로브 메시지로의 이관은 W5 이후 별건 게이트 개정).
+- 실패는 무슨 뜻인가: `ActualPageChildWindows=False` 이고 다른 술어가 True 면 카드 목록 컨트롤의 클래스
+  등록(`DECLARE_WND_CLASS_EX(L"NoteExCardList", …)`)이나 페이지의 컨트롤 생성(ID 2101·가시)이 깨진 것이다.
+  메시지 프로브 3건만 False 면 LB 호환 메시지 구현의 회귀다.

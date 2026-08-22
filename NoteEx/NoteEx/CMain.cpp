@@ -2,6 +2,7 @@
 #include "CMain.h"
 
 #include "CApplication.h"
+#include "CCardList.h"
 #include "pynote/platform/win32_device_settings.h"
 
 #include <algorithm>
@@ -27,6 +28,25 @@ namespace
 			return(std::wstring{});
 		}
 		return(Result);
+	}
+
+	// 카드 목록 렌더 서비스·표시 설정 배선. 디바이스·브러시 캐시·텍스트 엔진은 CApplication
+	// 소유이고 창이 서기 전에 이미 초기화돼 있다(CApplication.cpp:681~688).
+	void bind_card_list(C_DOCUMENT_PAGE& _Page, CApplication& _Application)
+	{
+		_Page.SetRenderServices(&_Application.D2DDevice(), &_Application.BrushCache(),
+			&_Application.TextEngine());
+		S_CARD_LIST_DISPLAY Display;
+		std::wstring sValue;
+		if (_Application.Settings().GetString("display/time_format", &sValue) && !sValue.empty())
+		{
+			Display.sTimeFormat = sValue;
+		}
+		if (_Application.Settings().GetString("display/timezone", &sValue) && !sValue.empty())
+		{
+			Display.sTimeZone = sValue;
+		}
+		_Page.SetDisplaySettings(Display);
 	}
 }
 
@@ -286,6 +306,7 @@ bool C_MAIN::refill_after_document_removal_()
 		return(false);
 	}
 	m_sDocumentId = *sRefillId;
+	bind_card_list(m_DocumentPage, *m_pApplication);
 	if (!m_DocumentPage.Init(
 		m_hInst, m_LeftPane, m_EditorPane,
 		m_pApplication->Database(), m_pApplication->Repositories(), m_pApplication->CardService(),
@@ -426,6 +447,7 @@ LRESULT C_MAIN::OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	m_hStatus = ::CreateWindowExW(0, STATUSCLASSNAMEW, L"준비",
 		WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0,
 		this->m_hWnd, reinterpret_cast<HMENU>(IDC_MAIN_STATUS), m_hInst, nullptr);
+	bind_card_list(m_DocumentPage, *m_pApplication);
 	if (!m_hStatus || !m_DocumentPage.Init(
 		m_hInst, m_LeftPane, m_EditorPane,
 		m_pApplication->Database(), m_pApplication->Repositories(), m_pApplication->CardService(),

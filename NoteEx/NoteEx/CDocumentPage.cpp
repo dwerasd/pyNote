@@ -1,5 +1,9 @@
 ﻿#include "CDocumentPage.h"
 
+// ATL/WTL 은 CreateEvent 매크로가 살아 있을 때 읽어야 한다 - 아래 #undef 뒤에 두면
+// atlbase.h·atlapp.h 의 ::CreateEvent 호출이 식별자를 잃는다(실측 C3861/C2039).
+#include "CCardList.h"
+
 #ifdef CreateEvent
 #undef CreateEvent
 #endif
@@ -14,12 +18,15 @@
 #include "pynote/core/storage/database.h"
 #include "pynote/core/storage/repositories.h"
 
+#include "CChangeBus.h"
+
 #include <CommCtrl.h>
 #include <Richedit.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -80,7 +87,6 @@ struct C_DOCUMENT_PAGE::S_STATE
 	HINSTANCE hInstance{};
 	HWND hListHost{};
 	HWND hEditorHost{};
-	HWND hCardList{};
 	HWND hEditor{};
 	HWND hFind{};
 	HWND hReplace{};
@@ -97,7 +103,8 @@ struct C_DOCUMENT_PAGE::S_STATE
 	std::string sDocumentId;
 	std::optional<std::string> sDraftId{};
 	std::optional<std::string> sCurrentCardId{};
-	std::vector<std::string> ListCardIds;
+	// 행 <-> 카드 매핑과 선택은 프로젝션이 단독 소유한다(구 ListCardIds 중복 소유 제거).
+	C_CARD_LIST CardList;
 	C_DOCUMENT_PAGE::LeavePrompt LeavePrompt;
 	C_DOCUMENT_PAGE::ChangeNotifier Notifier;
 	bool bSynchronizing{ false };
@@ -149,36 +156,30 @@ struct C_DOCUMENT_PAGE::S_STATE
 		}
 	}
 
+	// 원본 DocumentPage.refresh(): 목록만 다시 읽는다. 선택·현재 카드는 프로젝션이 들고
+	// 있으므로 되돌려 놓을 것이 없고, 스크롤도 새 내용 높이로 클램프만 된다(결정 5 의 S1 몫).
 	bool refresh_cards()
 	{
 		std::vector<domain::S_CARD> Cards;
 		if (pCardService->ListActiveCards(sDocumentId, this->service_sort(), &Cards) !=
 			app::E_CARD_SERVICE_RESULT::Ok) { return(false); }
 		Projection->SetCards(Cards);
-		ListCardIds.clear();
-		::SendMessageW(hCardList, LB_RESETCONTENT, 0, 0);
-		for (std::size_t nRow = 0; nRow < Projection->RowCount(); ++nRow)
-		{
-			const auto* pCard = Projection->CardAt(nRow);
-			if (!pCard) { continue; }
-			ListCardIds.push_back(pCard->sId);
-			std::wstring Label = wide(pCard->sBody);
-			if (Label.empty()) { Label = L"(빈 카드)"; }
-			const auto nLine = Label.find_first_of(L"\r\n");
-			if (nLine != std::wstring::npos) { Label.resize(nLine); }
-			if (Label.size() > 80) { Label.resize(80); }
-			::SendMessageW(hCardList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(Label.c_str()));
-		}
-		if (sCurrentCardId)
-		{
-			const auto it = std::find(ListCardIds.begin(), ListCardIds.end(), *sCurrentCardId);
-			if (it != ListCardIds.end())
-			{
-				::SendMessageW(hCardList, LB_SETCURSEL,
-					static_cast<WPARAM>(std::distance(ListCardIds.begin(), it)), 0);
-			}
-		}
+		CardList.OnProjectionChanged();
 		return(true);
+	}
+
+	// 원본 reveal_card(document_page.py:286~296) 등가 - 보이는 카드면 선택까지 옮기고
+	// 화면에 들인다. 필터에 가려 행이 없으면 현재 카드만 잡는다.
+	void select_current_card_()
+	{
+		if (!sCurrentCardId) { return; }
+		if (!Projection->SelectVisibleCard(*sCurrentCardId, domain::E_CARD_SELECTION_INTENT::Replace))
+		{
+			Projection->SetCurrentCardId(*sCurrentCardId);
+			return;
+		}
+		const auto nRow = Projection->RowForCard(*sCurrentCardId);
+		if (nRow) { CardList.EnsureVisible(*nRow); }
 	}
 
 	// 기동 복구 처분의 W3 자리(원본 app.py:893 _resolve_startup_recovery → main_window.py:994
@@ -207,9 +208,10 @@ struct C_DOCUMENT_PAGE::S_STATE
 		if (Opened.eOutcome != app::E_DRAFT_OUTCOME::Ok || !Opened.Session) { return(false); }
 		sDraftId = Opened.Session->sDraftId;
 		sCurrentCardId = Card.sId;
-		Projection->SetCurrentCardId(Card.sId);
 		if (_bReplaceEditor) { this->set_editor_text(Opened.Session->sText); }
+		// 새로 만들어진 카드는 이 갱신 뒤에야 프로젝션에 들어온다 - 선택은 그 다음이다.
 		this->refresh_cards();
+		this->select_current_card_();
 		::SetFocus(hEditor);
 		return(true);
 	}
@@ -255,20 +257,6 @@ struct C_DOCUMENT_PAGE::S_STATE
 		}
 		return(::DefSubclassProc(_hWnd, _uMessage, _wParam, _lParam));
 	}
-
-	static LRESULT CALLBACK ListSubclass(
-		HWND _hWnd, UINT _uMessage, WPARAM _wParam, LPARAM _lParam,
-		UINT_PTR, DWORD_PTR _nReference)
-	{
-		auto* pState = reinterpret_cast<S_STATE*>(_nReference);
-		if (_uMessage == WM_NCDESTROY) { ::RemoveWindowSubclass(_hWnd, &S_STATE::ListSubclass, 2); }
-		if (pState && _uMessage == WM_KEYDOWN && _wParam == VK_RETURN)
-		{
-			pState->pOwner->OpenSelectedCard();
-			return(0);
-		}
-		return(::DefSubclassProc(_hWnd, _uMessage, _wParam, _lParam));
-	}
 };
 
 C_DOCUMENT_PAGE::C_DOCUMENT_PAGE() : m_pState(std::make_unique<S_STATE>())
@@ -297,7 +285,6 @@ bool C_DOCUMENT_PAGE::Init(
 	State.bCardSaveFailed = false;
 	State.sDraftId.reset();
 	State.sCurrentCardId.reset();
-	State.ListCardIds.clear();
 	State.hInstance = _hInstance;
 	State.hListHost = _hListHost;
 	State.hEditorHost = _hEditorHost;
@@ -310,13 +297,29 @@ bool C_DOCUMENT_PAGE::Init(
 	State.sDocumentId = std::move(_sDocumentId);
 	State.LeavePrompt = std::move(_LeavePrompt);
 	State.Projection = std::make_unique<domain::C_CARD_LIST_PROJECTION>();
+	State.CardList.Bind(*State.Projection);
 	State.FirstInput = std::make_unique<app::C_FIRST_INPUT_CAPTURE>(
 		_CardService, *State.Projection, State.sDocumentId);
+	// 원본은 생성 시점에 정책 미리보기 줄 수를 모델에 건다(document_page.py:89~111).
+	// 정책 행이 없거나 CHECK 를 어기면 기동을 닫는 것은 앱 수준(CApplication::validate_policy)
+	// 의 일이라 여기서는 프로젝션 기본값(3)으로 계속한다.
+	const auto Policy = pynote::shell::LoadDataPolicy(_Database);
+	if (Policy)
+	{
+		State.Projection->SetPreviewLineCount(
+			static_cast<std::size_t>((std::max<std::int64_t>)(1, Policy->nPreviewLines)));
+	}
 	State.hRichEdit = ::LoadLibraryW(L"Msftedit.dll");
 	if (!State.hRichEdit) { return(false); }
-	State.hCardList = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
-		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
-		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_CARD_LIST), _hInstance, nullptr);
+	RECT CardListRect{ 0, 0, 1, 1 };
+	if (!State.CardList.Create(_hListHost, CardListRect, nullptr,
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL, WS_EX_CLIENTEDGE,
+		static_cast<UINT>(IDC_DOCUMENT_CARD_LIST)))
+	{
+		this->Cleanup();
+		return(false);
+	}
+	State.CardList.SetActivateHandler([&State]() { State.pOwner->OpenSelectedCard(); });
 	State.hHistory = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
 		WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
 		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_HISTORY), _hInstance, nullptr);
@@ -329,10 +332,8 @@ bool C_DOCUMENT_PAGE::Init(
 	State.hEditor = ::CreateWindowExW(WS_EX_CLIENTEDGE, MSFTEDIT_CLASS, L"",
 		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
 		0, 0, 1, 1, _hEditorHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_EDITOR), _hInstance, nullptr);
-	if (!State.hCardList || !State.hHistory || !State.hFind || !State.hReplace || !State.hEditor ||
+	if (!State.hHistory || !State.hFind || !State.hReplace || !State.hEditor ||
 		!::SetWindowSubclass(State.hEditor, &S_STATE::EditorSubclass, 1,
-			reinterpret_cast<DWORD_PTR>(&State)) ||
-		!::SetWindowSubclass(State.hCardList, &S_STATE::ListSubclass, 2,
 			reinterpret_cast<DWORD_PTR>(&State)))
 	{
 		this->Cleanup();
@@ -350,15 +351,19 @@ bool C_DOCUMENT_PAGE::Init(
 	if (!State.refresh_cards()) { this->Cleanup(); return(false); }
 	if (UiState.sSelectedCardId)
 	{
-		const auto it = std::find(State.ListCardIds.begin(), State.ListCardIds.end(), *UiState.sSelectedCardId);
-		if (it != State.ListCardIds.end())
+		const auto nRow = State.Projection->RowForCard(*UiState.sSelectedCardId);
+		if (nRow)
 		{
-			::SendMessageW(State.hCardList, LB_SETCURSEL,
-				static_cast<WPARAM>(std::distance(State.ListCardIds.begin(), it)), 0);
+			State.Projection->SelectVisibleCard(*UiState.sSelectedCardId,
+				domain::E_CARD_SELECTION_INTENT::Replace);
+			State.CardList.EnsureVisible(*nRow);
 		}
 	}
-	::SendMessageW(State.hCardList, LB_SETTOPINDEX,
-		static_cast<WPARAM>((std::max<std::int64_t>)(0, UiState.nListScrollPosition)), 0);
+	// 결정 4: 영속 좌표계는 파이썬과 같은 픽셀이다. 선택 복원 뒤에 덮어쓰는 순서까지
+	// 원본과 같다(main_window.py:985~991).
+	State.CardList.ScrollToPixel(static_cast<int>((std::min<std::int64_t>)(
+		(std::numeric_limits<int>::max)(),
+		(std::max<std::int64_t>)(0, UiState.nListScrollPosition))));
 	if (UiState.sEditorCardId)
 	{
 		const auto Suppressed = State.editor_restore_suppressed(*UiState.sEditorCardId);
@@ -386,6 +391,17 @@ bool C_DOCUMENT_PAGE::Init(
 void C_DOCUMENT_PAGE::SetChangeNotifier(ChangeNotifier _Notifier)
 {
 	m_pState->Notifier = std::move(_Notifier);
+}
+
+void C_DOCUMENT_PAGE::SetRenderServices(d2d::C_D2D_DEVICE* _pDevice,
+	d2d::C_D2D_BRUSH_CACHE* _pBrushCache, d2d::C_D2D_TEXT* _pText)
+{
+	m_pState->CardList.AttachRenderServices(_pDevice, _pBrushCache, _pText);
+}
+
+void C_DOCUMENT_PAGE::SetDisplaySettings(const S_CARD_LIST_DISPLAY& _Display)
+{
+	m_pState->CardList.SetDisplaySettings(_Display);
 }
 
 bool C_DOCUMENT_PAGE::PreTranslateMessage(MSG* _pMessage)
@@ -477,12 +493,14 @@ bool C_DOCUMENT_PAGE::PersistState(const std::optional<std::pair<int, int>>& _Sp
 	if (!m_pState->pDatabase || !m_pState->pRepositories) { return(false); }
 	app::S_DOCUMENT_UI_STATE State;
 	State.sDocumentId = m_pState->sDocumentId;
-	const LRESULT nSelection = ::SendMessageW(m_pState->hCardList, LB_GETCURSEL, 0, 0);
-	if (nSelection != LB_ERR && static_cast<std::size_t>(nSelection) < m_pState->ListCardIds.size())
+	// 현재 카드가 행을 잃었으면 선택 없음으로 적는다(원본 main_window.py:945~946 은
+	// 유효하지 않은 현재 인덱스에 None 을 남긴다).
+	const std::optional<std::string>& sCurrent = m_pState->Projection->CurrentCardId();
+	if (sCurrent && m_pState->Projection->RowForCard(*sCurrent))
 	{
-		State.sSelectedCardId = m_pState->ListCardIds[static_cast<std::size_t>(nSelection)];
+		State.sSelectedCardId = *sCurrent;
 	}
-	State.nListScrollPosition = ::SendMessageW(m_pState->hCardList, LB_GETTOPINDEX, 0, 0);
+	State.nListScrollPosition = m_pState->CardList.ScrollOffsetDip();
 	State.eSortMode = m_pState->Projection->SortMode();
 	if (m_pState->sDraftId)
 	{
@@ -511,7 +529,8 @@ bool C_DOCUMENT_PAGE::Cleanup()
 		bOk = bOk && Released.eOutcome == app::E_DRAFT_OUTCOME::Ok;
 		m_pState->sDraftId.reset();
 	}
-	HWND* Windows[] = { &m_pState->hCardList, &m_pState->hHistory,
+	if (m_pState->CardList.IsWindow()) { m_pState->CardList.DestroyWindow(); }
+	HWND* Windows[] = { &m_pState->hHistory,
 		&m_pState->hFind, &m_pState->hReplace, &m_pState->hEditor };
 	for (HWND* pWindow : Windows)
 	{
@@ -532,7 +551,7 @@ void C_DOCUMENT_PAGE::Layout()
 	RECT EditorClient{};
 	::GetClientRect(m_pState->hListHost, &ListClient);
 	::GetClientRect(m_pState->hEditorHost, &EditorClient);
-	::MoveWindow(m_pState->hCardList, 0, 0, ListClient.right, ListClient.bottom, TRUE);
+	::MoveWindow(m_pState->CardList.m_hWnd, 0, 0, ListClient.right, ListClient.bottom, TRUE);
 	::MoveWindow(m_pState->hHistory, 0, 0, ListClient.right, ListClient.bottom, TRUE);
 	const bool bFind = ::IsWindowVisible(m_pState->hFind) != FALSE;
 	const bool bReplace = ::IsWindowVisible(m_pState->hReplace) != FALSE;
@@ -545,9 +564,11 @@ void C_DOCUMENT_PAGE::Layout()
 
 bool C_DOCUMENT_PAGE::OpenSelectedCard()
 {
-	const LRESULT nSelection = ::SendMessageW(m_pState->hCardList, LB_GETCURSEL, 0, 0);
-	return(nSelection != LB_ERR && static_cast<std::size_t>(nSelection) < m_pState->ListCardIds.size() &&
-		m_pState->open_card(m_pState->ListCardIds[static_cast<std::size_t>(nSelection)], true));
+	const std::optional<std::string>& sCurrent = m_pState->Projection->CurrentCardId();
+	if (!sCurrent || !m_pState->Projection->RowForCard(*sCurrent)) { return(false); }
+	// open_card 가 프로젝션의 현재 카드 문자열을 다시 쓰므로 참조로 넘기지 않는다.
+	const std::string sCardId = *sCurrent;
+	return(m_pState->open_card(sCardId, true));
 }
 
 bool C_DOCUMENT_PAGE::Save()
@@ -581,13 +602,13 @@ bool C_DOCUMENT_PAGE::Refresh()
 void C_DOCUMENT_PAGE::FocusCardList()
 {
 	::ShowWindow(m_pState->hHistory, SW_HIDE);
-	::ShowWindow(m_pState->hCardList, SW_SHOW);
-	::SetFocus(m_pState->hCardList);
+	::ShowWindow(m_pState->CardList.m_hWnd, SW_SHOW);
+	::SetFocus(m_pState->CardList.m_hWnd);
 }
 
 void C_DOCUMENT_PAGE::ShowHistory()
 {
-	::ShowWindow(m_pState->hCardList, SW_HIDE);
+	::ShowWindow(m_pState->CardList.m_hWnd, SW_HIDE);
 	::ShowWindow(m_pState->hHistory, SW_SHOW);
 	::SetFocus(m_pState->hHistory);
 }
@@ -600,7 +621,8 @@ void C_DOCUMENT_PAGE::ShowFind(bool _bReplace)
 	::SetFocus(_bReplace ? m_pState->hReplace : m_pState->hFind);
 }
 
-HWND C_DOCUMENT_PAGE::CardListHwnd() const noexcept { return(m_pState->hCardList); }
+HWND C_DOCUMENT_PAGE::CardListHwnd() const noexcept { return(m_pState->CardList.m_hWnd); }
+C_CARD_LIST& C_DOCUMENT_PAGE::CardList() const noexcept { return(m_pState->CardList); }
 HWND C_DOCUMENT_PAGE::EditorHwnd() const noexcept { return(m_pState->hEditor); }
 HWND C_DOCUMENT_PAGE::FindHwnd() const noexcept { return(m_pState->hFind); }
 HWND C_DOCUMENT_PAGE::ReplaceHwnd() const noexcept { return(m_pState->hReplace); }

@@ -54,6 +54,12 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_single_instance.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_time_zone_resolver.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="CCardList.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CApplication.cpp">
@@ -87,6 +93,12 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_single_instance.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="CCardList.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>

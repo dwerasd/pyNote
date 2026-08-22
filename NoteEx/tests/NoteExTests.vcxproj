@@ -82,6 +82,7 @@
 	<ClInclude Include="..\NoteEx\CChangeBus.h" />
 	<ClInclude Include="..\NoteEx\CWindowLayout.h" />
 	<ClInclude Include="..\NoteEx\CDocumentListShell.h" />
+	<ClInclude Include="..\NoteEx\CCardList.h" />
 	<ClInclude Include="..\NoteEx\CDocumentPage.h" />
 	<ClInclude Include="..\NoteEx\CSearchDialog.h" />
   </ItemGroup>
@@ -133,6 +134,7 @@
 	<ClCompile Include="..\NoteEx\CChangeBus.cpp" />
 	<ClCompile Include="..\NoteEx\CWindowLayout.cpp" />
 	<ClCompile Include="..\NoteEx\CDocumentListShell.cpp" />
+	<ClCompile Include="..\NoteEx\CCardList.cpp" />
 	<ClCompile Include="..\NoteEx\CDocumentPage.cpp" />
 	<ClCompile Include="..\NoteEx\CSearchDialog.cpp" />
     <ClCompile Include="harness\src\win32_harness.cpp" />
@@ -145,6 +147,7 @@
     <ClCompile Include="harness\src\rich_edit_p1_probe_test.cpp" />
 	<ClCompile Include="harness\src\window_layout_test.cpp" />
 	<ClCompile Include="harness\src\w3_shell_consumer_test.cpp" />
+	<ClCompile Include="harness\src\w4_card_list_test.cpp" />
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
       <!-- 상류 원본이라 경고를 손대지 않는다. -->

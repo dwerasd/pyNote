@@ -850,7 +850,7 @@ try {
         $editor -ne [IntPtr]::Zero -and $historyList -ne [IntPtr]::Zero -and
         $findInput -ne [IntPtr]::Zero -and $replaceInput -ne [IntPtr]::Zero -and
         [NoteExWindowProbe]::ClassNameOf($status) -eq 'msctls_statusbar32' -and
-        [NoteExWindowProbe]::ClassNameOf($cardList) -eq 'ListBox' -and
+        [NoteExWindowProbe]::ClassNameOf($cardList) -eq 'NoteExCardList' -and
         [NoteExWindowProbe]::ClassNameOf($historyList) -eq 'ListBox' -and
         [NoteExWindowProbe]::ClassNameOf($editor) -eq 'RICHEDIT50W' -and
         [NoteExWindowProbe]::IsWindowVisible($status) -and

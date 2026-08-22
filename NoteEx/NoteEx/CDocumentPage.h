@@ -20,6 +20,11 @@ namespace pynote::core::application
 }
 namespace pynote::core::domain { class C_CARD_LIST_PROJECTION; }
 namespace pynote::core::storage { class C_DATABASE; class C_REPOSITORIES; }
+// 카드 목록 컨트롤(CCardList.h). 헤더에서 전역 선언만 하면 ATL/WTL·D2DWrapp 헤더가
+// 이 파일을 읽는 모든 TU 로 번지지 않는다(W3 시험 TU 의 CreateEvent 순서 계약 보호).
+class C_CARD_LIST;
+struct S_CARD_LIST_DISPLAY;
+namespace d2d { class C_D2D_DEVICE; class C_D2D_BRUSH_CACHE; class C_D2D_TEXT; }
 
 class C_DOCUMENT_PAGE final
 {
@@ -45,6 +50,11 @@ public:
 		std::string _sWorkspaceId, std::string _sDocumentId,
 		LeavePrompt _LeavePrompt = {});
 	void SetChangeNotifier(ChangeNotifier _Notifier);
+	// 아래 둘은 Init 앜에 불러야 첫 프레임부터 그려진다. 서비스가 없으면 목록은
+	// 그리지만 않고 행·메시지·Enter·스크롤은 그대로 동작한다.
+	void SetRenderServices(d2d::C_D2D_DEVICE* _pDevice,
+		d2d::C_D2D_BRUSH_CACHE* _pBrushCache, d2d::C_D2D_TEXT* _pText);
+	void SetDisplaySettings(const S_CARD_LIST_DISPLAY& _Display);
 	bool PreTranslateMessage(MSG* _pMessage);
 	bool Protect();
 	// 이탈 승인만(원본 card_editor.can_leave_editor) - 깨끗한 세션은 그대로 둔다. 창 닫기·앱 종료의
@@ -65,6 +75,8 @@ public:
 	void ShowFind(bool _bReplace);
 
 	HWND CardListHwnd() const noexcept;
+	// 컨트롤 자체 API(스크롤 오프셋·프레임 관측)에 닿는 자리다.
+	C_CARD_LIST& CardList() const noexcept;
 	HWND EditorHwnd() const noexcept;
 	HWND FindHwnd() const noexcept;
 	HWND ReplaceHwnd() const noexcept;

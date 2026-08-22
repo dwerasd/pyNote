@@ -58,6 +58,9 @@
 	<ClInclude Include="..\NoteEx\CDocumentListShell.h">
 	  <Filter>하네스</Filter>
 	</ClInclude>
+	<ClInclude Include="..\NoteEx\CCardList.h">
+	  <Filter>하네스</Filter>
+	</ClInclude>
 	<ClInclude Include="..\NoteEx\CDocumentPage.h">
 	  <Filter>하네스</Filter>
 	</ClInclude>
@@ -201,6 +204,9 @@
 	<ClCompile Include="..\NoteEx\CDocumentListShell.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
+	<ClCompile Include="..\NoteEx\CCardList.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
 	<ClCompile Include="..\NoteEx\CDocumentPage.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
@@ -235,6 +241,9 @@
 	  <Filter>하네스</Filter>
 	</ClCompile>
 	<ClCompile Include="harness\src\w3_shell_consumer_test.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
+	<ClCompile Include="harness\src\w4_card_list_test.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp">
