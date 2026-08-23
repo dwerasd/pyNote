@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +36,9 @@ namespace pynote::core::domain
 {
 	class C_CARD_LIST_PROJECTION;
 	enum class E_CARD_SELECTION_MODE;
+	// 휠 탐색 상태 기계도 같은 이유로 CCardList.cpp 에서만 읽는다(W2-R6 완성분을 소비만 한다).
+	class C_CARD_WHEEL_BROWSE;
+	struct S_CARD_WHEEL_TIMER_COMMAND;
 }
 
 // 원본 CardDelegate 의 클래스 상수를 그대로 옮긴 것이다(card_delegate.py:23~27, :70).
@@ -212,6 +216,9 @@ inline constexpr std::uint64_t CARD_KEYBOARD_SEARCH_INTERVAL_MS = 400;
 // PostDeferred 가 자기 자신에게 보내는 사설 메시지(QTimer.singleShot(0, ...) 쌍둥이).
 // CApplication 은 다른 HWND 에서 WM_APP+20/21 을 쓰므로 충돌하지 않는다.
 inline constexpr UINT CARD_LIST_DEFERRED_MESSAGE = WM_APP + 0x41;
+// 휠 정숙 열기 타이머의 id 다. 이 컨트롤에는 다른 타이머가 없으므로 같은 id 를 다시 걸면
+// 이전 타이머가 대체되고, 그것이 원본 QTimer.start() 재시작과 같은 관측을 만든다.
+inline constexpr UINT_PTR CARD_LIST_WHEEL_TIMER_ID = 1;
 
 class C_CARD_LIST final : public CWindowImpl<C_CARD_LIST>
 {
@@ -222,6 +229,11 @@ public:
 	using OpenCardHandler = std::function<void(const std::string&)>;
 	using EmptyAreaClickHandler = std::function<void()>;
 	using DeleteHandler = std::function<void(std::vector<std::string>)>;
+	// 원본 card_browse_requested 의 자리다. 반환값은 페이지 _open_card 의 결과이고
+	// core CompleteOpen 이 그 값으로 선택 복원 여부를 가른다.
+	using BrowseCardHandler = std::function<bool(const std::string&)>;
+	// 원본 self.editor.card_id 는 열기 실패 뒤에 읽힌다 - 미리 받아 두지 않고 그 시점에 부른다.
+	using EditorCardProvider = std::function<std::optional<std::string>()>;
 
 	C_CARD_LIST();
 	~C_CARD_LIST();
@@ -234,6 +246,8 @@ public:
 	void SetOpenCardHandler(OpenCardHandler _Handler);
 	void SetEmptyAreaClickHandler(EmptyAreaClickHandler _Handler);
 	void SetDeleteHandler(DeleteHandler _Handler);
+	void SetBrowseCardHandler(BrowseCardHandler _Handler);
+	void SetEditorCardProvider(EditorCardProvider _Provider);
 	// 디바이스·브러시 캐시·텍스트 엔진은 CApplication 소유다. 붙지 않으면 그리지 않고
 	// 나머지(행·LB 메시지·Enter·스크롤 산술)는 그대로 동작한다.
 	void AttachRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -256,6 +270,18 @@ public:
 	bool IsRowSelected(std::size_t _nRow) const;
 	// QTimer.singleShot(0, ...) 의 네이티브 쌍둥이. 사설 메시지 도착 시 선입선출로 실행한다.
 	void PostDeferred(std::function<void()> _Callable);
+
+	// ---- 휠 탐색(S3). 각 누적·클램프·세대·데드라인·복원 정책은 core 가 소유한다. ----
+	// 원본 _pending_browse_card_id / _wheel_angle / cancel_pending_browse 의 관측·조작 자리다.
+	std::optional<std::string> PendingBrowseCardId() const;
+	int WheelAngleRemainder() const;
+	void CancelPendingBrowse();
+	// Qt setCurrentIndex(index) 의 쌍둥이 - 선택 치환·앵커·Shift 기준·현재 관측·자동 스크롤까지다.
+	// 대기 중 휠 탐색은 취소하지 않는다(원본 setCurrentIndex 도 취소하지 않고, 만료 시점의
+	// 동일성 검사가 대신 막는다).
+	void SetCurrentRow(std::size_t _nRow);
+	// 원본 reveal_card(document_page.py:286~296)의 목록 쪽 절반 - 취소 뒤 SetCurrentRow 다.
+	void RevealRow(std::size_t _nRow);
 
 	std::size_t RowCount() const noexcept;
 	int LineSpacingDip() const;
@@ -290,6 +316,16 @@ public:
 		MESSAGE_HANDLER(WM_RBUTTONDOWN, OnRButtonDown)
 		MESSAGE_HANDLER(WM_RBUTTONUP, OnRButtonUp)
 		MESSAGE_HANDLER(WM_CAPTURECHANGED, OnCaptureChanged)
+		// WM_MOUSEHWHEEL 은 처리하지 않는다 - DefWindowProc 이 부모로 올려 보내는 것이
+		// 원본의 "수평 각은 accept 하지 않는다"(오라클 P9)와 같은 관측이다.
+		MESSAGE_HANDLER(WM_MOUSEWHEEL, OnMouseWheel)
+		MESSAGE_HANDLER(WM_TIMER, OnTimer)
+		// 가운데·X 버튼은 소비하지 않고 취소만 한다(Qt 도 mousePressEvent 를 주고 원본이 취소한다).
+		MESSAGE_HANDLER(WM_MBUTTONDOWN, OnOtherButtonDown)
+		MESSAGE_HANDLER(WM_XBUTTONDOWN, OnOtherButtonDown)
+		// Alt 계열 키를 Win32 는 WM_SYSKEYDOWN/WM_SYSCHAR 로 돌리지만 Qt 는 같은 keyPressEvent 다.
+		MESSAGE_HANDLER(WM_SYSKEYDOWN, OnSysKey)
+		MESSAGE_HANDLER(WM_SYSCHAR, OnSysKey)
 		MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
 		MESSAGE_HANDLER(WM_CHAR, OnChar)
 		MESSAGE_HANDLER(CARD_LIST_DEFERRED_MESSAGE, OnDeferred)
@@ -318,6 +354,10 @@ public:
 	LRESULT OnRButtonDown(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnRButtonUp(UINT, WPARAM, LPARAM, BOOL&) { return(0); }
 	LRESULT OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnMouseWheel(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnOtherButtonDown(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnSysKey(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnKeyDown(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnChar(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnDeferred(UINT, WPARAM, LPARAM, BOOL&);
@@ -360,6 +400,8 @@ private:
 	void keyboard_search_(wchar_t _Char);
 	bool prefix_match_(std::size_t _nRow, const std::wstring& _sPrefix) const;
 	void reset_press_state_();
+	// core 스케줄러 포트의 구현. Arm 은 SetTimer, Cancel 은 KillTimer 다.
+	void schedule_wheel_timer_(const pynote::core::domain::S_CARD_WHEEL_TIMER_COMMAND& _Command);
 	bool render_();
 	bool draw_text_(ID2D1DeviceContext* _pDc, IDWriteTextFormat* _pFormat,
 		ID2D1Brush* _pBrush, const S_DIP_RECT& _Rect, const std::wstring& _sText);
@@ -413,4 +455,11 @@ private:
 	std::vector<std::function<void()>> m_Deferred;
 	std::wstring m_sSearchInput;
 	std::uint64_t m_nSearchTickMs{ 0 };
+
+	// ---- 휠 탐색(S3). 상태 기계가 프로젝션을 참조로 잡으므로 Bind 마다 새로 만든다. ----
+	std::unique_ptr<pynote::core::domain::C_CARD_WHEEL_BROWSE> m_pWheel;
+	// 마지막 Arm 의 세대다. WM_TIMER 가 도착하면 core 가 이 값으로 신선도를 판정한다.
+	std::uint64_t m_nWheelTimerGeneration{ 0 };
+	BrowseCardHandler m_BrowseCard;
+	EditorCardProvider m_EditorCard;
 };

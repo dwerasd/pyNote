@@ -74,6 +74,9 @@ public:
 	bool OnEmptyAreaClicked();
 	// 원본 _delete_cards(document_page.py:795~813) - 파괴적 명령 사전 점검을 거쳐 순서대로 지운다.
 	bool DeleteCards(const std::vector<std::string>& _CardIds);
+	// 원본 reveal_card(document_page.py:286~296) - 행을 선택·표시만 하고 편집면에는 연결하지
+	// 않는다. 필터에 가려 행이 없으면 false 를 돌리고 선택도 대기 중 휠 탐색도 건드리지 않는다.
+	bool RevealCard(const std::string& _sCardId);
 
 	bool OpenSelectedCard();
 	bool Save();

@@ -4,6 +4,7 @@
 #include <D2DWrapp/D2DDevice.h>
 
 #include "pynote/core/domain/card_list_projection.h"
+#include "pynote/core/domain/card_wheel_browse.h"
 #include "pynote/core/domain/date_time_formatter.h"
 #include "pynote/platform/win32_time_zone_resolver.h"
 
@@ -18,6 +19,10 @@
 namespace
 {
 	namespace domain = pynote::core::domain;
+
+	// Win32 한 틱(WHEEL_DELTA)과 core 의 각 단위가 같아야 "틱당 한 장" 이 성립한다.
+	static_assert(WHEEL_DELTA == domain::CARD_WHEEL_VERTICAL_ANGLE_STEP,
+		"WHEEL_DELTA 와 CARD_WHEEL_VERTICAL_ANGLE_STEP 이 어긋나면 틱당 한 장 계약이 깨진다");
 
 	// 말줄임표는 U+2026 한 글자다(원본 f"{displayed[-1]}…", card_delegate.py:216).
 	constexpr wchar_t ELLIPSIS[] = L"…";
@@ -313,11 +318,21 @@ C_CARD_LIST::~C_CARD_LIST()
 
 void C_CARD_LIST::Bind(domain::C_CARD_LIST_PROJECTION& _Projection) noexcept
 {
+	// 새 프로젝션은 새 상태 기계다 - 옛 타이머부터 걷고 만든다(떠난 세대의 WM_TIMER 방지).
+	if (this->IsWindow()) { ::KillTimer(this->m_hWnd, CARD_LIST_WHEEL_TIMER_ID); }
+	m_nWheelTimerGeneration = 0;
+	m_pWheel.reset();
 	m_pProjection = &_Projection;
 	// 새 프로젝션은 새 목록이다 - 앵커·Shift 기준·"현재를 본 적 있는가" 를 모두 되돌린다.
 	m_bCurrentObserved = false;
 	m_sAnchorCardId.reset();
 	m_ShiftBase.clear();
+	// 시계는 단조 ms, 스케줄러는 SetTimer/KillTimer 다. 둘 다 비어 있지 않으므로 core
+	// 생성자의 invalid_argument 는 발생할 수 없다(그래서 이 함수는 noexcept 로 남는다).
+	m_pWheel = std::make_unique<domain::C_CARD_WHEEL_BROWSE>(_Projection,
+		[]() { return(static_cast<std::int64_t>(::GetTickCount64())); },
+		[this](const domain::S_CARD_WHEEL_TIMER_COMMAND& _Command)
+			{ this->schedule_wheel_timer_(_Command); });
 }
 
 void C_CARD_LIST::SetActivateHandler(ActivateHandler _Handler)
@@ -338,6 +353,74 @@ void C_CARD_LIST::SetEmptyAreaClickHandler(EmptyAreaClickHandler _Handler)
 void C_CARD_LIST::SetDeleteHandler(DeleteHandler _Handler)
 {
 	m_Delete = std::move(_Handler);
+}
+
+void C_CARD_LIST::SetBrowseCardHandler(BrowseCardHandler _Handler)
+{
+	m_BrowseCard = std::move(_Handler);
+}
+
+void C_CARD_LIST::SetEditorCardProvider(EditorCardProvider _Provider)
+{
+	m_EditorCard = std::move(_Provider);
+}
+
+std::optional<std::string> C_CARD_LIST::PendingBrowseCardId() const
+{
+	if (!m_pWheel) { return(std::nullopt); }
+	return(m_pWheel->PendingCardId());
+}
+
+int C_CARD_LIST::WheelAngleRemainder() const
+{
+	return(m_pWheel ? m_pWheel->AngleRemainder() : 0);
+}
+
+void C_CARD_LIST::CancelPendingBrowse()
+{
+	// core 가 대기 카드·잔여 각·진행 중 열기를 지우고 세대를 올린 뒤 Cancel 명령을 낸다.
+	if (m_pWheel) { m_pWheel->Cancel(); }
+}
+
+void C_CARD_LIST::SetCurrentRow(std::size_t _nRow)
+{
+	if (!m_pProjection || _nRow >= m_pProjection->RowCount()) { return; }
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return; }
+	m_pProjection->SelectVisibleCard(pCard->sId, domain::E_CARD_SELECTION_INTENT::Replace);
+	// Qt setCurrentIndex -> ClearAndSelect 경로와 같게 앵커·Shift 기준도 이 행으로 간다.
+	this->set_anchor_(_nRow);
+	m_ShiftBase = { pCard->sId };
+	this->observe_current_();
+	this->EnsureVisible(_nRow);
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+}
+
+void C_CARD_LIST::RevealRow(std::size_t _nRow)
+{
+	// 원본 reveal_card 순서: 유효성 확인 -> 대기 취소 -> setCurrentIndex -> scrollTo.
+	// 범위 밖이면 취소도 하지 않는다(원본이 취소 앞에서 돌아간다).
+	if (!m_pProjection || _nRow >= m_pProjection->RowCount()) { return; }
+	this->CancelPendingBrowse();
+	this->SetCurrentRow(_nRow);
+}
+
+void C_CARD_LIST::schedule_wheel_timer_(const domain::S_CARD_WHEEL_TIMER_COMMAND& _Command)
+{
+	if (_Command.eOperation == domain::E_CARD_WHEEL_TIMER_OPERATION::Cancel)
+	{
+		if (this->IsWindow()) { ::KillTimer(this->m_hWnd, CARD_LIST_WHEEL_TIMER_ID); }
+		m_nWheelTimerGeneration = 0;
+		return;
+	}
+	// 창이 없으면 타이머가 떨어질 곳이 없다 - Arm 은 통째로 무동작이다.
+	if (!this->IsWindow() || !_Command.nDeadlineMs) { return; }
+	m_nWheelTimerGeneration = _Command.nGeneration;
+	const std::int64_t nElapse =
+		*_Command.nDeadlineMs - static_cast<std::int64_t>(::GetTickCount64());
+	// 같은 id 는 이전 타이머를 대체한다 - Arm 마다 정숙 구간이 처음부터 다시 흐른다.
+	::SetTimer(this->m_hWnd, CARD_LIST_WHEEL_TIMER_ID,
+		static_cast<UINT>((std::max<std::int64_t>)(USER_TIMER_MINIMUM, nElapse)), nullptr);
 }
 
 void C_CARD_LIST::PostDeferred(std::function<void()> _Callable)
@@ -1221,6 +1304,8 @@ LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 
 LRESULT C_CARD_LIST::OnLButtonDown(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 {
+	// 원본 mousePressEvent(:248)는 어떤 버튼이든 기록 앞에서 먼저 취소한다.
+	this->CancelPendingBrowse();
 	// WM_LBUTTONDBLCLK 도 이 핸들러로 온다 - Qt 는 mouseDoubleClickEvent 를 재정의하지 않으므로
 	// 더블클릭의 두 번째 press 도 평범한 press 이고 열기는 release 에서만 난다(오라클 N5).
 	this->observe_current_();
@@ -1325,6 +1410,8 @@ LRESULT C_CARD_LIST::OnLButtonUp(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 
 LRESULT C_CARD_LIST::OnRButtonDown(UINT, WPARAM, LPARAM _lParam, BOOL&)
 {
+	// 원본 mousePressEvent 는 버튼을 가리지 않고 먼저 취소한다.
+	this->CancelPendingBrowse();
 	// 원본 _select_context_index: 미선택 행이면 그 행만 남기고, 선택된 행이면 선택을 유지한 채
 	// 현재만 옮긴다. 컨텍스트 메뉴 자체는 S4 소유라 여기서는 선택 조정만 한다.
 	this->observe_current_();
@@ -1355,6 +1442,103 @@ LRESULT C_CARD_LIST::OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	return(0);
 }
 
+LRESULT C_CARD_LIST::OnMouseWheel(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
+{
+	// 고해상도 장치는 WHEEL_DELTA 보다 작은 각을 보낸다 - 부호 있는 short 로 읽는다.
+	const int nDelta = GET_WHEEL_DELTA_WPARAM(_wParam);
+	const WORD nKeys = GET_KEYSTATE_WPARAM(_wParam);
+	const bool bCtrl = (nKeys & MK_CONTROL) != 0;
+	const bool bShift = (nKeys & MK_SHIFT) != 0;
+	// MK_* 에는 Alt·Win 비트가 없다 - 키 상태 표에서 읽는다(S2 §3.1.3 과 같은 규칙).
+	const bool bAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+	const bool bMeta = ((::GetKeyState(VK_LWIN) | ::GetKeyState(VK_RWIN)) & 0x8000) != 0;
+	// 비소비 분기(원본 wheelEvent 의 네 이접지): 빈 목록·0 각·수식키 중 Alt/Win.
+	// Alt 는 Windows QPA 가 세로 휠을 수평으로 바꿔 넣어(오라클 P13) 원본이 가로 스크롤바
+	// (범위 0)로 흘려보내고 미수락으로 끝난다. Win 키는 원본이 줄 스크롤로 흘리는데,
+	// 여기서는 "탐색이 소비하지 않는다" 까지만 보장한다(줄 스크롤 잔여 = CAP-FI-064 부분).
+	if (!m_pProjection || !m_pWheel || this->RowCount() == 0 || nDelta == 0 || bAlt || bMeta)
+	{
+		// DefWindowProc 이 WM_MOUSEWHEEL 을 부모로 올린다 - Qt "미수락 -> 부모에게" 의 쌍둥이다.
+		_bHandled = FALSE;
+		return(0);
+	}
+	if (bCtrl || bShift)
+	{
+		// Qt QAbstractSliderPrivate::scrollByDelta 의 Ctrl/Shift 갈래는 델타와 무관하게
+		// 한 페이지다(오라클 P1/P2: -120 도 -360 도 636). pageStep = viewport 높이다.
+		const int nViewport = this->ViewportHeightDip();
+		const int nBefore = m_nScrollOffsetDip;
+		// Qt 는 int(offset * pageStep) 로 절사한다(L2 감사 프로브: -13 -> 75, -17 -> 98).
+		const int nBy = (std::clamp)(static_cast<int>(
+			static_cast<double>(nDelta) * nViewport / 120.0), -nViewport, nViewport);
+		this->ScrollToPixel(m_nScrollOffsetDip - nBy);
+		// 값이 바뀌지 않으면 Qt 는 수락하지 않는다(P4/P11) - 부모가 처리 기회를 갖는다.
+		if (m_nScrollOffsetDip == nBefore) { _bHandled = FALSE; }
+		return(0);
+	}
+	const int nBefore = m_pWheel->AngleRemainder();
+	const domain::S_CARD_WHEEL_RESULT Result = m_pWheel->OnVerticalAngle(nDelta);
+	// CEILING: core 결과에 steps 가 없어 잔여각 전후로 역산한다, core 가 nSteps 를 노출하면 교체
+	// (card_wheel_browse.cpp:17~23 의 대수적 역함수 - 방향 반전 시 폐기되는 잔여 각까지 반영한다).
+	const int nAdjusted = (nBefore != 0 && (nDelta > 0) != (nBefore > 0)) ? 0 : nBefore;
+	const int nSteps = (nAdjusted + nDelta - Result.nAngleRemainder) /
+		domain::CARD_WHEEL_VERTICAL_ANGLE_STEP;
+	// 원본은 steps 가 0 이 아닐 때만 setCurrentIndex + scrollTo 를 부른다(card_stream.py:342~351).
+	// 한 틱을 못 채운 각은 행도 스크롤도 건드리지 않는다(오라클 P12b).
+	if (nSteps != 0 && Result.nCurrentRow) { this->SetCurrentRow(*Result.nCurrentRow); }
+	this->observe_current_();
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	// 탐색 경로는 행 이동 여부와 무관하게 늘 소비한다(원본 event.accept(), 오라클 [NOTES] 6).
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnTimer(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
+{
+	if (_wParam != CARD_LIST_WHEEL_TIMER_ID) { _bHandled = FALSE; return(0); }
+	// 단발 타이머다 - 처리 전에 먼저 걷는다.
+	if (this->IsWindow()) { ::KillTimer(this->m_hWnd, CARD_LIST_WHEEL_TIMER_ID); }
+	if (!m_pWheel) { return(0); }
+	// core 는 세대·대기 카드·현재 카드가 모두 맞을 때만 요청을 낸다(CAP-NC-012).
+	const std::optional<domain::S_CARD_WHEEL_OPEN_REQUEST> Request =
+		m_pWheel->OnTimer(m_nWheelTimerGeneration);
+	if (!Request) { return(0); }
+	const bool bOpened = m_BrowseCard ? m_BrowseCard(Request->sCardId) : false;
+	// 원본은 편집면 카드를 실패 뒤에 읽는다(document_page.py:453) - 미리 캐시하면 열기가
+	// 바꿔 놓은 값을 놓친다.
+	m_pWheel->SetEditorCardId(m_EditorCard ? m_EditorCard() : std::nullopt);
+	const domain::E_CARD_WHEEL_FOCUS_EFFECT eEffect = m_pWheel->CompleteOpen(*Request, bOpened);
+	if (eEffect == domain::E_CARD_WHEEL_FOCUS_EFFECT::FocusEditor)
+	{
+		// 원본 reveal_card 는 취소까지 한다 - core OnTimer 는 대기 카드·데드라인만 지우므로
+		// 잔여 각은 여기서 RevealRow 의 취소로 0 이 된다(L2 프로브 [D]).
+		std::optional<std::size_t> nRow;
+		const std::optional<std::string>& sEditorCard = m_pWheel->EditorCardId();
+		if (m_pProjection && sEditorCard) { nRow = m_pProjection->RowForCard(*sEditorCard); }
+		if (nRow) { this->RevealRow(*nRow); }
+	}
+	this->observe_current_();
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnOtherButtonDown(UINT, WPARAM, LPARAM, BOOL& _bHandled)
+{
+	// Qt 는 가운데·X 버튼에도 mousePressEvent 를 주고 원본은 그 앞에서 취소한다.
+	// 컨트롤은 이 버튼들을 처리하지 않으므로 취소만 하고 흘려보낸다.
+	this->CancelPendingBrowse();
+	_bHandled = FALSE;
+	return(0);
+}
+
+LRESULT C_CARD_LIST::OnSysKey(UINT, WPARAM, LPARAM, BOOL& _bHandled)
+{
+	// Alt 조합은 Win32 가 WM_SYSKEYDOWN/WM_SYSCHAR 로 돌리지만 Qt 에는 같은 keyPressEvent 다.
+	// 메뉴 활성화 기본 동작은 그대로 두고 취소만 얹는다.
+	this->CancelPendingBrowse();
+	_bHandled = FALSE;
+	return(0);
+}
+
 LRESULT C_CARD_LIST::OnDeferred(UINT, WPARAM, LPARAM, BOOL&)
 {
 	if (m_Deferred.empty()) { return(0); }
@@ -1366,6 +1550,9 @@ LRESULT C_CARD_LIST::OnDeferred(UINT, WPARAM, LPARAM, BOOL&)
 
 LRESULT C_CARD_LIST::OnChar(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
 {
+	// Win32 는 한 번의 타건을 WM_KEYDOWN + WM_CHAR 로 쪼갠다 - 원본은 keyPressEvent 한 번에서
+	// 취소하므로 양쪽 다 취소해야 합성 WM_CHAR 단독도 Qt 와 같게 움직인다. 검색 가드보다 앞이다.
+	this->CancelPendingBrowse();
 	// Qt keyboardSearch 의 modified 가드: 제어 문자와 Ctrl/Alt 조합은 검색에 실리지 않는다.
 	if (_wParam < 0x20 || (::GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
 		(::GetKeyState(VK_MENU) & 0x8000) != 0)
@@ -1389,6 +1576,8 @@ LRESULT C_CARD_LIST::OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&)
 
 LRESULT C_CARD_LIST::OnKeyDown(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
 {
+	// 원본 keyPressEvent(:302)는 소비하지 않는 키에도 먼저 취소한다.
+	this->CancelPendingBrowse();
 	this->observe_current_();
 	switch (static_cast<int>(_wParam))
 	{
@@ -1453,6 +1642,10 @@ LRESULT C_CARD_LIST::OnPaletteChanged(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 
 LRESULT C_CARD_LIST::OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 {
+	// 창이 사라지면 타이머를 먼저 걷고 상태 기계를 놓는다(떠난 창으로 WM_TIMER 가 떨어지지 않게).
+	::KillTimer(this->m_hWnd, CARD_LIST_WHEEL_TIMER_ID);
+	m_nWheelTimerGeneration = 0;
+	m_pWheel.reset();
 	m_Target.Shutdown();
 	m_bTargetReady = false;
 	m_bRecoveringDevice = false;
@@ -1490,15 +1683,9 @@ LRESULT C_CARD_LIST::OnListSetCurSel(UINT, WPARAM _wParam, LPARAM, BOOL&)
 		return(LB_ERR);
 	}
 	if (nRow < 0 || static_cast<std::size_t>(nRow) >= m_pProjection->RowCount()) { return(LB_ERR); }
-	const domain::S_CARD* pCard = m_pProjection->CardAt(static_cast<std::size_t>(nRow));
-	if (!pCard) { return(LB_ERR); }
-	m_pProjection->SelectVisibleCard(pCard->sId, domain::E_CARD_SELECTION_INTENT::Replace);
-	// Qt setCurrentIndex -> ClearAndSelect 경로와 같게 앵커·Shift 기준도 이 행으로 간다.
-	this->set_anchor_(static_cast<std::size_t>(nRow));
-	m_ShiftBase = { pCard->sId };
-	this->observe_current_();
-	this->EnsureVisible(static_cast<std::size_t>(nRow));
-	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	if (!m_pProjection->CardAt(static_cast<std::size_t>(nRow))) { return(LB_ERR); }
+	// Qt setCurrentIndex 와 같은 자리다 - 선택·앵커·Shift 기준·EnsureVisible 을 한 곳에서 쓴다.
+	this->SetCurrentRow(static_cast<std::size_t>(nRow));
 	return(nRow);
 }
 

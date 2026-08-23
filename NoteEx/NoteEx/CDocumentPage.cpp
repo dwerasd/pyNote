@@ -165,6 +165,9 @@ struct C_DOCUMENT_PAGE::S_STATE
 		std::vector<domain::S_CARD> Cards;
 		if (pCardService->ListActiveCards(sDocumentId, this->service_sort(), &Cards) !=
 			app::E_CARD_SERVICE_RESULT::Ok) { return(false); }
+		// 원본은 modelAboutToBeReset 에서 취소한다 - 읽기가 성공한 뒤, 리셋 바로 앞이다.
+		// 읽기가 실패하면 원본은 예외로 빠져나가 리셋에 닿지 않으므로 여기서도 취소하지 않는다.
+		CardList.CancelPendingBrowse();
 		Projection->SetCards(Cards);
 		CardList.OnProjectionChanged();
 		return(true);
@@ -175,13 +178,9 @@ struct C_DOCUMENT_PAGE::S_STATE
 	void select_current_card_()
 	{
 		if (!sCurrentCardId) { return; }
-		if (!Projection->SelectVisibleCard(*sCurrentCardId, domain::E_CARD_SELECTION_INTENT::Replace))
-		{
-			Projection->SetCurrentCardId(*sCurrentCardId);
-			return;
-		}
-		const auto nRow = Projection->RowForCard(*sCurrentCardId);
-		if (nRow) { CardList.EnsureVisible(*nRow); }
+		// 원본과 같은 reveal_card 한 자리로 모은다 - 대기 중 휠 탐색 취소와 앵커 이동까지
+		// 포함된다. 행이 없으면(필터에 가림) 현재 카드만 잡던 S1/W3 갈래를 그대로 둔다.
+		if (!pOwner->RevealCard(*sCurrentCardId)) { Projection->SetCurrentCardId(*sCurrentCardId); }
 	}
 
 	// 기동 복구 처분의 W3 자리(원본 app.py:893 _resolve_startup_recovery → main_window.py:994
@@ -201,7 +200,16 @@ struct C_DOCUMENT_PAGE::S_STATE
 	// 앱 주도 open_card/reveal_card 는 true 로 부른다.
 	bool open_card(const std::string& _sCardId, bool _bReplaceEditor, bool _bReveal = true)
 	{
-		if (sDraftId && sCurrentCardId == _sCardId) { ::SetFocus(hEditor); return(true); }
+		// 같은 카드를 다시 여는 것도 "열기" 다 - 원본은 이 경우에도 card_connected 를 다시 emit 해
+		// (card_editor.py:192~196) _card_connected -> reveal_card -> cancel_pending_browse 로
+		// 잔여 각이 0 이 된다. 이 갈래는 refresh_cards() 도 아래 명시 취소도 지나가지 않으므로
+		// 여기서 직접 부른다(spec §3.4.4).
+		if (sDraftId && sCurrentCardId == _sCardId)
+		{
+			CardList.CancelPendingBrowse();
+			::SetFocus(hEditor);
+			return(true);
+		}
 		if (sDraftId && pOwner->RequestLeave() == app::E_LEAVE_RESULT::Denied) { return(false); }
 		domain::S_CARD Card;
 		if (pRepositories->GetCard(_sCardId, &Card) != storage::E_REPO_RESULT::Ok || Card.nDeletedAtUs)
@@ -218,6 +226,11 @@ struct C_DOCUMENT_PAGE::S_STATE
 		// 마우스 press·Enter 는 이미 현재 카드를 잡아 두었다 - 여기서 다시 선택하면 방금 만든
 		// 다중 선택이 한 장으로 접힌다(오라클 M5/M10 이 열기 뒤에도 선택을 유지한다).
 		if (_bReveal) { this->select_current_card_(); }
+		// 원본은 성공한 열기의 끝에서 잔여 각이 0 이 된다 - card_connected -> _card_connected ->
+		// reveal_card -> cancel_pending_browse 사슬이다(card_editor.py:247, document_page.py:887~892).
+		// 네이티브에는 그 신호 사슬이 없으므로 여기서 명시로 부른다(refresh_cards 가 S5 에서
+		// 델타 소비로 바뀌어도 이 관측은 그대로 남는다).
+		CardList.CancelPendingBrowse();
 		::SetFocus(hEditor);
 		return(true);
 	}
@@ -355,6 +368,25 @@ bool C_DOCUMENT_PAGE::Init(
 	State.CardList.SetEmptyAreaClickHandler([&State]() { State.pOwner->OnEmptyAreaClicked(); });
 	State.CardList.SetDeleteHandler([&State](std::vector<std::string> _CardIds)
 		{ State.pOwner->DeleteCards(_CardIds); });
+	// 원본 _browse_card(document_page.py:443~456).
+	State.CardList.SetBrowseCardHandler([&State](const std::string& _sCardId)
+		{
+			// 성공하면 편집면이 가져간 포커스를 목록으로 되돌린다 - 그러지 않으면 이어지는
+			// 방향키 탐색이 편집기 커서 이동으로 새어 나간다.
+			if (State.open_card(_sCardId, true, false))
+			{
+				::SetFocus(State.CardList.m_hWnd);
+				return(true);
+			}
+			// 실패(이탈 거부·카드 소멸·초안 열기 실패)면 선택 복원은 core CompleteOpen 몫이고
+			// 여기서는 포커스만 편집면에 둔다(원본 _focus_editor_slot 은 무조건이다).
+			::SetFocus(State.hEditor);
+			return(false);
+		});
+	// 원본 self.editor.card_id 자리. 네이티브는 초안 세션이 늘 카드를 들고 있어
+	// (sDraftId 와 sCurrentCardId 가 함께 서고 함께 진다) 세션 유무로 판정한다.
+	State.CardList.SetEditorCardProvider([&State]() -> std::optional<std::string>
+		{ return(State.sDraftId ? State.sCurrentCardId : std::nullopt); });
 	State.hHistory = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
 		WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
 		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_HISTORY), _hInstance, nullptr);
@@ -660,6 +692,16 @@ bool C_DOCUMENT_PAGE::DeleteCards(const std::vector<std::string>& _CardIds)
 	State.refresh_cards();
 	State.notify_change();
 	// 원본은 삭제 뒤 포커스를 옮기지 않는다.
+	return(true);
+}
+
+bool C_DOCUMENT_PAGE::RevealCard(const std::string& _sCardId)
+{
+	if (!m_pState || !m_pState->Projection) { return(false); }
+	// 원본은 index 가 유효하지 않으면 취소 앞에서 돌아간다 - 선택도 대기도 그대로다.
+	const auto nRow = m_pState->Projection->RowForCard(_sCardId);
+	if (!nRow) { return(false); }
+	m_pState->CardList.RevealRow(*nRow);
 	return(true);
 }
 
