@@ -83,6 +83,27 @@ pytest
 `requirements.txt` 와 `requirements-dev.txt` 는 `uv.lock` 에서 생성한다 — 각 파일
 머리에 생성 명령이 적혀 있다.
 
+## NoteEx — Windows 네이티브 포팅 (진행 중)
+
+`NoteEx/` 디렉터리는 위 파이썬/PySide6 앱을 WTL(Windows Template Library)
+기반 C++ 네이티브 앱으로 이식하는 별도 서브프로젝트다. 파이썬 원본을 동작
+기준(golden)으로 삼아 카드 목록·휠 탐색·드래그 선택·가져오기·검색 등 기능을
+단계적으로 포팅 중이며, 이 저장소 시점 기준 이식이 완료되지 않았다.
+
+- **구조**: `core/`(Win32 비의존 순수 도메인 로직) · `NoteEx/`(WTL 앱 셸) ·
+  `tests/`(Catch2 네이티브 테스트) · `tools/gates/`(파이썬/PowerShell 검증
+  게이트 — core 계층이 Win32 헤더를 끌어오지 않는지, DB 스키마·마이그레이션·
+  SQL 이 파이썬 원본과 일치하는지 등을 기계로 강제)
+- **빌드**: `NoteEx/NoteEx.sln` (Visual Studio, x64). `core/`·`NoteEx/`·
+  `tests/` 각각 별도 `.vcxproj`이며, `_Library`(솔루션 기준 4단 상위 외부
+  의존: DarkCore·D2DWrapp·DOpenSources·sqlite3)가 별도로 필요하다 — 이
+  저장소에는 포함돼 있지 않다.
+- **테스트/검증**: `NoteExTests.exe`(Catch2)와 `tools/gates/` 아래 다수의
+  파이썬 기반 골든/파리티 게이트로 파이썬 원본과의 동작 일치를 검증한다.
+- **상태**: Windows 전용, 활성 개발 중인 포팅 작업(완결 여부는 커밋 로그
+  기준 미확정). 일반 사용자는 위 파이썬 앱을 사용하면 되고, 이 서브프로젝트는
+  Windows 네이티브 빌드에 관심 있는 개발자를 위한 것이다.
+
 ## 라이선스
 
 [MIT](LICENSE)
