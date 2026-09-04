@@ -18,9 +18,11 @@ from pynote.domain.models import (
     Document,
     Draft,
     DraftKind,
+    FileBinding,
     LineageRelationType,
     NewCaptureOperation,
     NewCard,
+    NewlineKind,
     RevisionSource,
     SplitPolicy,
 )
@@ -480,6 +482,77 @@ class Repositories:
     def delete_card(self, card_id: str) -> None:
         self._connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
 
+    def get_file_binding(self, card_id: str) -> FileBinding | None:
+        row = self._connection.execute(
+            "SELECT * FROM card_file_bindings WHERE card_id = ?",
+            (card_id,),
+        ).fetchone()
+        return None if row is None else self._file_binding_from_row(row)
+
+    def find_active_binding_by_path(self, path_key: str) -> FileBinding | None:
+        """휴지통에 없는 카드가 쥐고 있는 결속만 경로로 찾는다."""
+        row = self._connection.execute(
+            """
+            SELECT card_file_bindings.*
+            FROM card_file_bindings
+            JOIN cards ON cards.id = card_file_bindings.card_id
+            WHERE card_file_bindings.path_key = ? AND cards.deleted_at_us IS NULL
+            """,
+            (path_key,),
+        ).fetchone()
+        return None if row is None else self._file_binding_from_row(row)
+
+    def find_binding_by_path(self, path_key: str) -> FileBinding | None:
+        """카드의 휴지통 상태와 무관하게 경로 점유 행을 찾는다."""
+        row = self._connection.execute(
+            "SELECT * FROM card_file_bindings WHERE path_key = ?",
+            (path_key,),
+        ).fetchone()
+        return None if row is None else self._file_binding_from_row(row)
+
+    def upsert_file_binding(self, binding: FileBinding) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO card_file_bindings(
+                card_id, path, path_key, encoding, bom, newline, trailing_newline,
+                synced_size, synced_mtime_ns, synced_hash, bound_at_us, synced_at_us
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(card_id) DO UPDATE SET
+                path = excluded.path,
+                path_key = excluded.path_key,
+                encoding = excluded.encoding,
+                bom = excluded.bom,
+                newline = excluded.newline,
+                trailing_newline = excluded.trailing_newline,
+                synced_size = excluded.synced_size,
+                synced_mtime_ns = excluded.synced_mtime_ns,
+                synced_hash = excluded.synced_hash,
+                bound_at_us = excluded.bound_at_us,
+                synced_at_us = excluded.synced_at_us
+            """,
+            (
+                binding.card_id,
+                binding.path,
+                binding.path_key,
+                binding.encoding,
+                int(binding.bom),
+                binding.newline.value,
+                int(binding.trailing_newline),
+                binding.synced_size,
+                binding.synced_mtime_ns,
+                binding.synced_hash,
+                binding.bound_at_us,
+                binding.synced_at_us,
+            ),
+        )
+
+    def delete_file_binding(self, card_id: str) -> None:
+        self._connection.execute(
+            "DELETE FROM card_file_bindings WHERE card_id = ?",
+            (card_id,),
+        )
+
     def create_revision(self, revision: CardRevision) -> None:
         self._connection.execute(
             """
@@ -863,6 +936,23 @@ class Repositories:
             body_hash=str(row["body_hash"]),
             current_revision_id=row["current_revision_id"],
             deleted_at_us=row["deleted_at_us"],
+        )
+
+    @staticmethod
+    def _file_binding_from_row(row: sqlite3.Row) -> FileBinding:
+        return FileBinding(
+            card_id=str(row["card_id"]),
+            path=str(row["path"]),
+            path_key=str(row["path_key"]),
+            encoding=str(row["encoding"]),
+            bom=bool(row["bom"]),
+            newline=NewlineKind(row["newline"]),
+            trailing_newline=bool(row["trailing_newline"]),
+            bound_at_us=int(row["bound_at_us"]),
+            synced_size=row["synced_size"],
+            synced_mtime_ns=row["synced_mtime_ns"],
+            synced_hash=row["synced_hash"],
+            synced_at_us=row["synced_at_us"],
         )
 
     @staticmethod

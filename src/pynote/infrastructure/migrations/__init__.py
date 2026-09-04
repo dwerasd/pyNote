@@ -27,6 +27,9 @@ from pynote.infrastructure.migrations.v0008_horizontal_split_reset import (
 from pynote.infrastructure.migrations.v0009_preview_lines_default import (
     migrate as migrate_v9,
 )
+from pynote.infrastructure.migrations.v0010_card_file_bindings import (
+    migrate as migrate_v10,
+)
 
 Migration = tuple[int, Callable[..., None]]
 
@@ -40,5 +43,6 @@ MIGRATIONS: tuple[Migration, ...] = (
     (7, migrate_v7),
     (8, migrate_v8),
     (9, migrate_v9),
+    (10, migrate_v10),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]

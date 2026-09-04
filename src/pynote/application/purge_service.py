@@ -81,6 +81,10 @@ class PurgeService:
                     (card_id,),
                 )
                 self._connection.execute(
+                    "DELETE FROM card_file_bindings WHERE card_id = ?",
+                    (card_id,),
+                )
+                self._connection.execute(
                     """
                     DELETE FROM card_lineage
                     WHERE parent_card_id = ? OR child_card_id = ?
@@ -167,6 +171,15 @@ class PurgeService:
                 )
                 self._connection.execute(
                     "DELETE FROM drafts WHERE document_id = ?",
+                    (document_id,),
+                )
+                self._connection.execute(
+                    """
+                    DELETE FROM card_file_bindings
+                    WHERE card_id IN (
+                        SELECT id FROM cards WHERE document_id = ?
+                    )
+                    """,
                     (document_id,),
                 )
                 if card_ids:

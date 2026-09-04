@@ -49,6 +49,21 @@ class LineageRelationType(StrEnum):
     MERGE = "merge"
 
 
+class NewlineKind(StrEnum):
+    """결속 파일에 되쓸 줄바꿈 형식이다."""
+
+    LF = "lf"
+    CRLF = "crlf"
+    CR = "cr"
+
+    @property
+    def characters(self) -> str:
+        """파일에 기록할 줄바꿈 문자를 반환한다."""
+        if self is NewlineKind.CRLF:
+            return "\r\n"
+        return "\r" if self is NewlineKind.CR else "\n"
+
+
 @dataclass(frozen=True, slots=True)
 class Document:
     id: str
@@ -110,6 +125,24 @@ class Draft:
     draft_hash: str
     cursor_position_qchar: int
     updated_at_us: int
+
+
+@dataclass(frozen=True, slots=True)
+class FileBinding:
+    """카드 한 장과 디스크 파일 한 개의 결속 상태다."""
+
+    card_id: str
+    path: str
+    path_key: str
+    encoding: str
+    bom: bool
+    newline: NewlineKind
+    trailing_newline: bool
+    bound_at_us: int
+    synced_size: int | None = None
+    synced_mtime_ns: int | None = None
+    synced_hash: str | None = None
+    synced_at_us: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
