@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import logging
 import os
@@ -25,6 +26,7 @@ from pynote.application.draft_coordinator import (
     RecoveryCandidate,
     build_recovery_plans,
 )
+from pynote.application.file_binding_service import resolve_path
 from pynote.domain.models import Card
 from pynote.infrastructure.backup import (
     AutomaticBackupManager,
@@ -58,6 +60,7 @@ DEVICE_SETTING_DEFAULTS: dict[str, object] = {
     "cards/multi_selection_enabled": False,
 }
 _NEW_WINDOW_MESSAGE = b"new-window\n"
+_OPEN_FILE_PREFIX = b"open-file\t"
 _INSTANCE_RETRY_DELAYS_SECONDS = (0.025, 0.05)
 _STALE_SOCKET_MIN_AGE_SECONDS = 1.0
 
@@ -73,26 +76,31 @@ def instance_socket_name(data_directory: Path) -> str:
 
 
 class SingleInstanceGuard(QObject):
-    """같은 데이터 디렉터리의 두 번째 실행을 새 창 명령으로 바꾼다."""
+    """같은 데이터 디렉터리의 두 번째 실행을 새 창·파일 열기 명령으로 바꾼다."""
 
     new_window_requested = Signal()
     activation_requested = Signal()
+    open_file_requested = Signal(Path)
 
     def __init__(
         self,
         data_directory: Path,
         *,
+        paths: tuple[Path, ...] = (),
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.socket_name = instance_socket_name(data_directory)
+        # 두 번째 실행 프로세스와 기존 서버의 cwd 가 다르므로 상대 경로를 여기서
+        # 확정한다 — 문자열을 그대로 넘기면 서버가 엉뚱한 파일을 연다(2-9).
+        self.paths: tuple[Path, ...] = tuple(path.resolve() for path in paths)
         self._server: QLocalServer | None = None
         self._lock_file: QLockFile | None = None
         self._clients: set[QLocalSocket] = set()
         self._client_buffers: dict[QLocalSocket, bytearray] = {}
 
     def acquire(self, *, timeout_ms: int = 500) -> bool:
-        """첫 실행이면 서버를 열고, 두 번째 실행이면 새 창 명령 후 False를 반환한다."""
+        """첫 실행이면 서버를 열고, 두 번째 실행이면 기동 명령 후 False를 반환한다."""
         if timeout_ms < 1:
             raise ValueError("단일 인스턴스 접속 제한 시간은 1ms 이상이어야 합니다.")
         if self._notify_existing(timeout_ms):
@@ -108,7 +116,7 @@ class SingleInstanceGuard(QObject):
                     return False
             raise RuntimeError(
                 "기존 인스턴스 소유권 잠금이 유지 중이지만 "
-                "새 창 명령을 전달하지 못했습니다."
+                "기동 명령을 전달하지 못했습니다."
             )
 
         self._lock_file = lock_file
@@ -151,6 +159,17 @@ class SingleInstanceGuard(QObject):
             self._lock_file.unlock()
             self._lock_file = None
 
+    def launch_message(self) -> bytes:
+        """기동 경로가 있으면 열기 명령 줄들을, 없으면 새 창 명령을 만든다(2-9)."""
+        if not self.paths:
+            return _NEW_WINDOW_MESSAGE
+        return b"".join(
+            _OPEN_FILE_PREFIX
+            + base64.urlsafe_b64encode(str(path).encode("utf-8"))
+            + b"\n"
+            for path in self.paths
+        )
+
     def _notify_existing(self, timeout_ms: int) -> bool:
         socket = QLocalSocket(self)
         try:
@@ -158,18 +177,18 @@ class SingleInstanceGuard(QObject):
             if not socket.waitForConnected(timeout_ms):
                 socket.abort()
                 return False
-            if socket.write(_NEW_WINDOW_MESSAGE) < 0:
+            if socket.write(self.launch_message()) < 0:
                 message = socket.errorString()
                 socket.abort()
                 raise RuntimeError(
-                    f"기존 인스턴스에 새 창 명령을 보내지 못했습니다: {message}"
+                    f"기존 인스턴스에 기동 명령을 보내지 못했습니다: {message}"
                 )
             socket.flush()
             if socket.bytesToWrite() > 0 and not socket.waitForBytesWritten(timeout_ms):
                 message = socket.errorString()
                 socket.abort()
                 raise RuntimeError(
-                    f"기존 인스턴스 새 창 명령을 완료하지 못했습니다: {message}"
+                    f"기존 인스턴스 기동 명령을 완료하지 못했습니다: {message}"
                 )
             socket.disconnectFromServer()
             return True
@@ -237,9 +256,22 @@ class SingleInstanceGuard(QObject):
             self._handle_command(bytes(command) + b"\n")
 
     def _handle_command(self, command: bytes) -> None:
-        if command != _NEW_WINDOW_MESSAGE:
+        if command == _NEW_WINDOW_MESSAGE:
+            self.new_window_requested.emit()
+            self.activation_requested.emit()
             return
-        self.new_window_requested.emit()
+        if not command.startswith(_OPEN_FILE_PREFIX):
+            return
+        encoded = command[len(_OPEN_FILE_PREFIX) :].removesuffix(b"\n")
+        try:
+            # 탭·개행이 든 파일명이 줄 프로토콜을 깨지 않게 base64 로 감쌌다(2-9).
+            decoded = base64.urlsafe_b64decode(encoded).decode("utf-8")
+        except ValueError:
+            LOGGER.warning("두 번째 실행이 보낸 파일 열기 명령을 해독하지 못했습니다.")
+            return
+        if not decoded:
+            return
+        self.open_file_requested.emit(Path(decoded))
         self.activation_requested.emit()
 
     def _finish_client(self, client: QLocalSocket) -> None:
@@ -624,6 +656,59 @@ class WindowManager(QObject):
             return True
         page = owner.page_for_document(document_id)
         return page is not None and page.open_card(card_id)
+
+    def open_path(self, path: Path) -> bool:
+        """기동 인자·두 번째 실행이 넘긴 경로를 열고 그 창을 활성화한다(2-9)."""
+        _resolved, path_key = resolve_path(path)
+        binding = self.context.repositories.find_active_binding_by_path(path_key)
+        if binding is None:
+            if not path.is_file():
+                # 부재 경로·디렉터리는 빈 창을 남기지 않고 알린 뒤 계속 진행한다(2-9).
+                self._report_path_open_failure(path)
+                return False
+            target = self.create_window()
+            created_here = True
+        else:
+            owner = self._binding_owner_window(path_key)
+            target = owner if owner is not None else self._window_for_request()
+            created_here = False
+        if not target.open_file_path(path):
+            if created_here and len(self.windows) > 1:
+                # 결속이 거부된 파일(결속 불가·상한 초과)이면 방금 만든 빈 창을 회수한다 —
+                # S8 의 창 총수 술어를 지킨다. 마지막 창이면 종료 절차로 들어가므로 남긴다.
+                target.close()
+            return False
+        self._protect_windows_quietly()
+        # 결속 카드 라우팅이 소유 창을 옮길 수 있어 열기 뒤에 다시 조회한다.
+        settled = self._binding_owner_window(path_key)
+        _activate_window(settled if settled is not None else target)
+        return True
+
+    def _binding_owner_window(self, path_key: str) -> MainWindow | None:
+        """결속 경로를 가진 카드의 문서를 이미 연 창을 찾는다."""
+        binding = self.context.repositories.find_active_binding_by_path(path_key)
+        if binding is None:
+            return None
+        card = self.context.repositories.get_card(binding.card_id)
+        if card is None:
+            return None
+        return self._document_windows.get(card.document_id)
+
+    def _window_for_request(self) -> MainWindow:
+        """결속 카드를 라우팅할 요청 창을 고른다 — 없으면 새로 만든다."""
+        windows = self.windows
+        return windows[-1] if windows else self.create_window()
+
+    def _report_path_open_failure(self, path: Path) -> None:
+        """열 수 없는 기동 경로를 알린다 — 앱은 정상적으로 뜬다(2-9)."""
+        LOGGER.warning("기동 경로를 열지 못했습니다: %s", path)
+        reason = (
+            "디렉터리는 열 수 없습니다."
+            if path.is_dir()
+            else "파일을 찾을 수 없습니다."
+        )
+        parent = self.windows[0] if self.windows else None
+        QMessageBox.warning(parent, "파일 열기", f"{path.name}: {reason}")
 
     def can_quit_application(self) -> bool:
         """전 창 초안을 보호한 뒤 편집기 이탈 승인을 순서대로 받는다."""
@@ -1067,6 +1152,12 @@ def _parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
         type=Path,
         help="명시한 SQLite 파일을 사용합니다.",
     )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="열어서 카드에 결속할 텍스트 파일 경로입니다.",
+    )
     return parser.parse_args(arguments)
 
 
@@ -1106,7 +1197,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
     else:
         database_path = _default_database_path()
 
-    instance_guard = SingleInstanceGuard(database_path.parent)
+    instance_guard = SingleInstanceGuard(
+        database_path.parent,
+        paths=tuple(options.paths),
+    )
     try:
         if not options.smoke and not instance_guard.acquire():
             return 0
@@ -1124,10 +1218,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
             manager = WindowManager(context)
             windows = manager.restore_windows()
             instance_guard.new_window_requested.connect(manager.create_window)
+            instance_guard.open_file_requested.connect(manager.open_path)
             quit_coordinator = ApplicationQuitCoordinator(application, manager)
             application.aboutToQuit.connect(manager.prepare_shutdown)
             for window in windows:
                 window.show()
+            # 복원 창을 먼저 세운 뒤 기동 경로를 연다 — 작업 공간을 대체하지 않는다(2-9).
+            # --smoke 는 기동 가능 여부만 보므로 경로를 열지 않는다(exec 전 모달로 멈추지 않게).
+            if not options.smoke:
+                for launch_path in instance_guard.paths:
+                    manager.open_path(launch_path)
             if options.smoke:
                 QTimer.singleShot(0, application.quit)
             return application.exec()
