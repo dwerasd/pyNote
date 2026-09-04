@@ -497,13 +497,11 @@ def test_reservation_cleanup_failure_keeps_original_error(
             raise OSError("비켜두기 실패 주입")
         real_replace(source_path, destination_path)
 
-    def fail_first_reservation_unlink(
-        self: Path, *args: object, **kwargs: object
-    ) -> None:
+    def fail_first_reservation_unlink(self: Path, missing_ok: bool = False) -> None:
         if unlink_armed["value"] and self.suffix == ".tmp":
             unlink_armed["value"] = False
             raise PermissionError("예약 정리 거부 주입")
-        real_unlink(self, *args, **kwargs)
+        real_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(backup_module.os, "replace", fail_first_move_aside)
     monkeypatch.setattr(Path, "unlink", fail_first_reservation_unlink)
