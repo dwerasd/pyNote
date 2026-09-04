@@ -203,7 +203,9 @@ def test_all_main_shortcuts_and_t7_t8_actions_are_wired(
     )
     expected = {
         "newDocumentAction": "Ctrl+N",
-        "documentListAction": "Ctrl+O",
+        # 메모장 관례대로 Ctrl+O 는 파일 열기가 가져가고 문서 목록은 한 칸 옮겼다.
+        "openFileAction": "Ctrl+O",
+        "documentListAction": "Ctrl+Shift+O",
         "globalSearchAction": "Ctrl+P",
         "importTextAction": "Ctrl+Shift+I",
         "exportTextAction": "Ctrl+Shift+E",

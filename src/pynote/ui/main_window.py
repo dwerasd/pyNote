@@ -28,6 +28,7 @@ from pynote.application.draft_coordinator import (
     RecoveryCandidate,
     build_recovery_plans,
 )
+from pynote.application.file_binding_service import resolve_path
 from pynote.application.purge_service import PurgeService
 from pynote.domain.models import Card
 from pynote.infrastructure.backup import (
@@ -181,8 +182,10 @@ class MainWindow(QMainWindow):
         self._automatic_backup_manager: object | None = None
         self._application_owners: tuple[object, ...] = ()
 
+        self._page: DocumentPage | None = None
+
         self.setObjectName("mainWindow")
-        self.setWindowTitle("pyNote")
+        self._refresh_window_title()
         self.resize(DEFAULT_WINDOW_SIZE)
 
         root = QWidget(self)
@@ -198,7 +201,6 @@ class MainWindow(QMainWindow):
         self.first_run_banner.hide()
         root_layout.addWidget(self.first_run_banner)
 
-        self._page: DocumentPage | None = None
         self._page_host = QWidget(root)
         self._page_host.setObjectName("documentPageHost")
         self._page_host_layout = QVBoxLayout(self._page_host)
@@ -497,6 +499,14 @@ class MainWindow(QMainWindow):
         page.editor.status_changed.connect(
             lambda _status, _text: self._update_status()
         )
+        # 제목의 파일명은 편집 세션이 바뀔 때마다 다시 조립한다(결속 해제·Save As 포함).
+        page.editor.card_connected.connect(
+            lambda _card_id: self._refresh_window_title()
+        )
+        page.editor.session_changed.connect(
+            lambda _connected: self._refresh_window_title()
+        )
+        page.binding_changed.connect(self._refresh_window_title)
         return page
 
     def _install_page(
@@ -512,12 +522,7 @@ class MainWindow(QMainWindow):
         if page is not None:
             self._page_host_layout.addWidget(page)
             page.show()
-            document = self._repositories.get_document(page.document_id)
-            self.setWindowTitle(
-                "pyNote" if document is None else f"{document.title} — pyNote"
-            )
-        else:
-            self.setWindowTitle("pyNote")
+        self._refresh_window_title()
         return previous
 
     def _handle_document_state_changed(self, document_id: str) -> None:
@@ -536,7 +541,7 @@ class MainWindow(QMainWindow):
                 )
             return
         if self.active_document_id == document_id:
-            self.setWindowTitle(f"{document.title} — pyNote")
+            self._refresh_window_title()
             self._save_workspace_from_ui()
             self._update_status()
 
@@ -557,7 +562,7 @@ class MainWindow(QMainWindow):
                 )
             return
         if self.active_document_id == document_id:
-            self.setWindowTitle(f"{document.title} — pyNote")
+            self._refresh_window_title()
             if self._page is not None and not self._publishing_page_content_change:
                 self._page.refresh()
             self._save_workspace_from_ui()
@@ -811,9 +816,29 @@ class MainWindow(QMainWindow):
         self.new_document_action.setShortcut(QKeySequence("Ctrl+N"))
         self.new_document_action.triggered.connect(self._create_new_document)
 
+        self.open_file_action = QAction("열기…", self)
+        self.open_file_action.setObjectName("openFileAction")
+        self.open_file_action.setShortcut(QKeySequence("Ctrl+O"))
+        self.open_file_action.triggered.connect(self._open_file)
+
+        self.save_card_action = QAction("저장", self)
+        self.save_card_action.setObjectName("saveCardAction")
+        self.save_card_action.setShortcut(QKeySequence("Ctrl+S"))
+        self.save_card_action.triggered.connect(self._save_active_card)
+
+        self.save_card_as_action = QAction("다른 이름으로 저장…", self)
+        self.save_card_as_action.setObjectName("saveCardAsAction")
+        self.save_card_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.save_card_as_action.triggered.connect(self._save_active_card_as)
+
+        self.unbind_file_action = QAction("파일 연결 끊기", self)
+        self.unbind_file_action.setObjectName("unbindFileAction")
+        self.unbind_file_action.triggered.connect(self._unbind_active_file)
+
         self.document_list_action = QAction("문서 목록…", self)
         self.document_list_action.setObjectName("documentListAction")
-        self.document_list_action.setShortcut(QKeySequence("Ctrl+O"))
+        # 메모장 관례대로 Ctrl+O 는 파일 열기가 가져간다.
+        self.document_list_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
         self.document_list_action.triggered.connect(self._open_document_list)
 
         self.search_action = QAction("문서와 카드 검색…", self)
@@ -909,6 +934,16 @@ class MainWindow(QMainWindow):
             action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
             self.addAction(action)
 
+        for action in (
+            self.open_file_action,
+            self.save_card_action,
+            self.save_card_as_action,
+        ):
+            # 창 2개에서 같은 시퀀스의 ApplicationShortcut 은 ambiguous 가 되어 어느
+            # 액션도 발동하지 않는다. 활성 창 하나만 반응해야 하므로 창 수준이다.
+            action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            self.addAction(action)
+
     def _create_menus(self) -> None:
         self.window_menu = self.menuBar().addMenu("창")
         self.window_menu.addAction(self.new_window_action)
@@ -916,6 +951,11 @@ class MainWindow(QMainWindow):
         self.file_menu = self.menuBar().addMenu("파일")
         self.file_menu.addAction(self.new_document_action)
         self.file_menu.addAction(self.document_list_action)
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.open_file_action)
+        self.file_menu.addAction(self.save_card_action)
+        self.file_menu.addAction(self.save_card_as_action)
+        self.file_menu.addAction(self.unbind_file_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.import_action)
         self.file_menu.addAction(self.export_action)
@@ -1172,6 +1212,80 @@ class MainWindow(QMainWindow):
         page = self.active_document_page()
         if page is not None and routed_card_id is not None:
             page.open_card(routed_card_id)
+
+    def _open_file(self) -> None:
+        if self.active_document_page() is None:
+            QMessageBox.warning(self, "파일 열기", "활성 문서가 없습니다.")
+            return
+        filename, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "파일 열기",
+            "",
+            "텍스트 (*.txt *.md *.json *.log *.ini *.csv);;모든 파일 (*)",
+        )
+        if not filename:
+            return
+        self.open_file_path(Path(filename))
+
+    def open_file_path(self, path: Path) -> bool:
+        """결속 조회와 교차 문서 라우팅을 거쳐 파일을 연다(2-8 3)."""
+        _resolved, path_key = resolve_path(path)
+        binding = self._repositories.find_active_binding_by_path(path_key)
+        if binding is not None:
+            return self._open_bound_card(binding.card_id)
+        page = self.active_document_page()
+        if page is None:
+            QMessageBox.warning(self, "파일 열기", "활성 문서가 없습니다.")
+            return False
+        return page.open_file(path)
+
+    def _open_bound_card(self, card_id: str) -> bool:
+        """이미 결속된 카드는 새로 만들지 않고 소유 문서에서 연다(S6)."""
+        card = self._repositories.get_card(card_id)
+        if card is None or card.deleted_at_us is not None:
+            return False
+        if self._search_result_router is not None:
+            # 검색 결과 열기와 같은 seam 이다 — 소유 창까지 라우팅한다.
+            return self._search_result_router(self, card.document_id, card.id)
+        if not self.open_document(card.document_id):
+            return False
+        page = self.page_for_document(card.document_id)
+        return page is not None and page.open_card(card.id)
+
+    def _save_active_card(self) -> None:
+        page = self.active_document_page()
+        if page is not None:
+            page.editor.save_current(interactive=True)
+
+    def _save_active_card_as(self) -> None:
+        page = self.active_document_page()
+        if page is not None:
+            page.save_card_as()
+
+    def _unbind_active_file(self) -> None:
+        page = self.active_document_page()
+        if page is not None and not page.unbind_file():
+            QMessageBox.information(self, "파일 연결 끊기", "결속된 파일이 없습니다.")
+
+    def _refresh_window_title(self) -> None:
+        """문서 제목과 결속 파일명을 한 곳에서 조립한다(2-10)."""
+        page = self._page
+        document = (
+            None
+            if page is None
+            else self._repositories.get_document(page.document_id)
+        )
+        if document is None:
+            self.setWindowTitle("pyNote")
+            return
+        title = f"{document.title} — pyNote"
+        card_id = None if page is None else page.editor.card_id
+        binding = (
+            None if card_id is None else self._repositories.get_file_binding(card_id)
+        )
+        if binding is not None:
+            title = f"{Path(binding.path).name} — {title}"
+        self.setWindowTitle(title)
 
     def _focus_card_list(self) -> None:
         page = self.active_document_page()

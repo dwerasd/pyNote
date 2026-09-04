@@ -44,12 +44,18 @@ from pynote.application.draft_coordinator import (
     DraftSession,
     RecoveryCandidate,
 )
+from pynote.application.file_binding_service import (
+    FileSyncOutcome,
+    detect_text,
+    hash_bytes,
+    sync_file,
+)
 from pynote.application.save_coordinator import (
     ImeCompositionInProgressError,
     SaveCoordinator,
     SaveOutcome,
 )
-from pynote.domain.models import CaptureOperationSource, Card
+from pynote.domain.models import CaptureOperationSource, Card, FileBinding
 from pynote.domain.paragraph_parser import ParagraphParser
 from pynote.infrastructure.repositories import Repositories
 from pynote.ui.cards.card_model import CARD_MIME_TYPE, CardListModel
@@ -75,13 +81,24 @@ CloseChoiceProvider = Callable[[DraftSession], CloseChoice]
 
 
 class EditorStatus(StrEnum):
-    """UX 설계의 카드 편집 상태 5단계다."""
+    """UX 설계의 카드 편집 상태 5단계에 결속 파일 쓰기 실패를 더한 값이다."""
 
     EDITING = "editing"
     DRAFT_PROTECTED = "draft_protected"
     SAVING = "saving"
     SAVED = "saved"
     SAVE_FAILED = "save_failed"
+    # 카드(DB)는 확정됐고 파일 되쓰기만 실패한 상태다. SAVE_FAILED 와 뜻이 달라야
+    # 다음 Ctrl+S 가 무엇을 재시도하는지 갈린다.
+    FILE_WRITE_FAILED = "file_write_failed"
+
+
+class ExternalChangeChoice(StrEnum):
+    """결속 파일이 외부에서 바뀌었을 때 고를 수 있는 처리다."""
+
+    OVERWRITE = "overwrite"
+    RELOAD = "reload"
+    CANCEL = "cancel"
 
 
 class CardOpenSource(Protocol):
@@ -247,6 +264,7 @@ class CardEditor(QPlainTextEdit):
         self.card_connected.emit(card_id)
         if session.card_id is not None:
             self.draft_dirty_changed.emit(session.card_id, session.dirty)
+        self._check_external_change_on_open(card_id)
         return True
 
     def set_recovery_disposition(
@@ -257,8 +275,13 @@ class CardEditor(QPlainTextEdit):
         """시작 시 확정한 recovery 처분을 해당 카드의 첫 진입에 적용한다."""
         self._recovery_dispositions[card_id] = disposition
 
-    def save_current(self) -> bool:
-        """현재 draft를 동기 저장하고 성공 뒤에만 카드 갱신 신호를 낸다."""
+    def save_current(self, *, interactive: bool = False) -> bool:
+        """현재 draft를 동기 저장하고 성공 뒤에만 카드 갱신 신호를 낸다.
+
+        interactive 는 사용자가 명시적으로 저장을 요청한 경로(Ctrl+S·저장 버튼)에서만
+        True 다. 반환값은 DB 확정 결과만 반영하며 결속 파일 되쓰기 실패는 이탈을 막지
+        않는다(설계지시서 2-5).
+        """
         session = self._session
         if session is None:
             return True
@@ -299,11 +322,170 @@ class CardEditor(QPlainTextEdit):
             EditorStatus.SAVED,
             f"저장됨 {self._format_time(result.card.updated_at_us)}",
         )
+        self._sync_binding_after_save(result.card, interactive=interactive)
         if was_dirty and session.card_id is not None and not session.dirty:
             self.draft_dirty_changed.emit(session.card_id, False)
         if result.outcome is SaveOutcome.SAVED:
             self.card_committed.emit(result.card)
         return True
+
+    def reload_from_file(self) -> bool:
+        """결속 파일 내용을 편집 세션 텍스트로 바꾼다. 파일은 건드리지 않는다."""
+        card_id = self.card_id
+        if card_id is None:
+            return False
+        binding = self._repositories.get_file_binding(card_id)
+        if binding is None:
+            return False
+        return self._reload_from_file(binding)
+
+    def _sync_binding_after_save(self, card: Card, *, interactive: bool) -> None:
+        """DB 확정이 끝난 카드를 결속 파일에 되쓰고 그 결과를 상태에 반영한다."""
+        binding = self._repositories.get_file_binding(card.id)
+        if binding is None:
+            return
+        result = sync_file(self._repositories, card, interactive=interactive)
+        if result.outcome is FileSyncOutcome.EXTERNAL_CHANGE and interactive:
+            choice = self._ask_external_change_choice(binding.path)
+            if choice is ExternalChangeChoice.OVERWRITE:
+                result = sync_file(
+                    self._repositories,
+                    card,
+                    force=True,
+                    interactive=True,
+                )
+            elif choice is ExternalChangeChoice.RELOAD:
+                if self._reload_from_file(binding):
+                    # 파일은 건드리지 않았고 세션은 dirty 다 — "저장됨" 문구가 남지 않게 한다.
+                    name = Path(binding.path).name
+                    self._set_status(
+                        EditorStatus.EDITING,
+                        f"카드 저장됨 · 파일에서 다시 읽음 {name} — Ctrl+S 로 확정",
+                    )
+                return
+        self._apply_sync_status(card, binding, result.outcome, result.error)
+
+    def _apply_sync_status(
+        self,
+        card: Card,
+        binding: FileBinding,
+        outcome: FileSyncOutcome,
+        error: str | None,
+    ) -> None:
+        if outcome is FileSyncOutcome.FAILED:
+            self._set_status(
+                EditorStatus.FILE_WRITE_FAILED,
+                f"카드 저장됨 · 파일 쓰기 실패 — 다시 시도: {error}",
+            )
+            return
+        if outcome is FileSyncOutcome.EXTERNAL_CHANGE:
+            self._set_status(
+                EditorStatus.SAVED,
+                "카드 저장됨 · 파일이 외부에서 변경되어 되쓰지 않았습니다",
+            )
+            return
+        self._set_status(
+            EditorStatus.SAVED,
+            f"저장됨 {self._format_time(card.updated_at_us)}"
+            f" · 파일 {Path(binding.path).name}",
+        )
+
+    def _check_external_change_on_open(self, card_id: str) -> None:
+        """결속 카드를 열 때 파일이 밖에서 바뀌었으면 처리를 묻는다(2-6)."""
+        binding = self._repositories.get_file_binding(card_id)
+        if binding is None or binding.synced_hash is None:
+            return
+        path = Path(binding.path)
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            self._set_status(
+                self._status,
+                f"결속 파일이 없습니다 — 다음 저장에서 다시 만듭니다: {path.name}",
+            )
+            return
+        except OSError as error:
+            LOGGER.warning("결속 파일을 읽지 못했습니다: %s", binding.path)
+            self._set_status(
+                self._status,
+                f"결속 파일을 읽지 못했습니다: {error}",
+            )
+            return
+        if hash_bytes(data) == binding.synced_hash:
+            return
+        if self._ask_open_external_change_choice(binding.path) is ExternalChangeChoice.RELOAD:
+            self._reload_from_file(binding)
+
+    def _reload_from_file(self, binding: FileBinding) -> bool:
+        if self._session is None:
+            return False
+        try:
+            data = Path(binding.path).read_bytes()
+        except OSError as error:
+            LOGGER.warning("결속 파일을 다시 읽지 못했습니다: %s", binding.path)
+            self._set_status(
+                EditorStatus.SAVE_FAILED,
+                f"파일을 다시 읽지 못했습니다: {error}",
+            )
+            return False
+        detected = detect_text(data)
+        if detected is None:
+            self._set_status(
+                EditorStatus.SAVE_FAILED,
+                "파일을 텍스트로 해석하지 못해 다시 읽지 않았습니다.",
+            )
+            return False
+        self.setPlainText(detected.text)
+        was_loading = self._loading
+        self._loading = True
+        try:
+            self._apply_line_spacing_to_document()
+        finally:
+            self._loading = was_loading
+        self._sync_session()
+        return True
+
+    def _ask_external_change_choice(self, path: str) -> ExternalChangeChoice:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("파일이 외부에서 변경됨")
+        box.setText(f"{Path(path).name} 파일이 마지막 저장 뒤에 바뀌었습니다.")
+        box.setInformativeText("덮어쓰면 외부에서 바뀐 내용이 사라집니다.")
+        overwrite_button = box.addButton(
+            "덮어쓰기",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        reload_button = box.addButton(
+            "파일에서 다시 읽기",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_button = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is overwrite_button:
+            return ExternalChangeChoice.OVERWRITE
+        if clicked is reload_button:
+            return ExternalChangeChoice.RELOAD
+        return ExternalChangeChoice.CANCEL
+
+    def _ask_open_external_change_choice(self, path: str) -> ExternalChangeChoice:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("파일이 외부에서 변경됨")
+        box.setText(f"{Path(path).name} 파일이 카드 내용과 다릅니다.")
+        reload_button = box.addButton(
+            "파일에서 다시 읽기",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        keep_button = box.addButton("카드 내용 유지", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep_button)
+        box.exec()
+        return (
+            ExternalChangeChoice.RELOAD
+            if box.clickedButton() is reload_button
+            else ExternalChangeChoice.CANCEL
+        )
 
     def can_leave_editor(
         self,
@@ -652,14 +834,24 @@ class CardEditor(QPlainTextEdit):
         return not self._draft_coordinator.is_ime_composing(session.draft_id)
 
     def event(self, event: QEvent) -> bool:
-        """선택이 있는 ESC 는 back_action 단축키보다 먼저 이 위젯이 가져간다."""
-        if (
-            event.type() is QEvent.Type.ShortcutOverride
-            and cast(QKeyEvent, event).key() == Qt.Key.Key_Escape
-            and self.textCursor().hasSelection()
-        ):
-            event.accept()
-            return True
+        """선택이 있는 ESC 와 세션이 있는 Ctrl+S 는 창 액션보다 먼저 가져간다."""
+        if event.type() is QEvent.Type.ShortcutOverride:
+            key_event = cast(QKeyEvent, event)
+            if (
+                key_event.key() == Qt.Key.Key_Escape
+                and self.textCursor().hasSelection()
+            ):
+                event.accept()
+                return True
+            if (
+                key_event.key() == Qt.Key.Key_S
+                and key_event.modifiers() == Qt.KeyboardModifier.ControlModifier
+                and self._session is not None
+            ):
+                # 편집기 포커스에서는 keyPressEvent 의 Ctrl+S 분기가 저장을 소유한다 —
+                # 수락하지 않으면 창의 saveCardAction 이 키를 먼저 가져간다.
+                event.accept()
+                return True
         return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -691,7 +883,7 @@ class CardEditor(QPlainTextEdit):
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_S:
-                self.save_current()
+                self.save_current(interactive=True)
                 event.accept()
                 return
             if event.key() == Qt.Key.Key_F:
@@ -1123,7 +1315,12 @@ class CardEditor(QPlainTextEdit):
             return
         if not isinstance(updated_at_us, int):
             raise TypeError("draft 보호 시각은 microsecond 정수여야 합니다.")
-        if self._status is EditorStatus.SAVING or self._card_save_failed:
+        if (
+            self._status is EditorStatus.SAVING
+            or self._status is EditorStatus.FILE_WRITE_FAILED
+            or self._card_save_failed
+        ):
+            # 파일이 기록되지 않았다는 유일한 표시를 초안 보호 문구가 덮지 않게 한다.
             return
         self._set_status(
             EditorStatus.DRAFT_PROTECTED,
@@ -1369,7 +1566,9 @@ class CardEditorWorkspace(QWidget):
         )
         editor.find_next_requested.connect(self.find_bar.find_next)
         editor.find_previous_requested.connect(self.find_bar.find_previous)
-        self.save_button.clicked.connect(editor.save_current)
+        self.save_button.clicked.connect(
+            lambda: editor.save_current(interactive=True)
+        )
         self.cancel_button.clicked.connect(editor.request_close)
         self._set_editor_enabled(False)
         self._handle_session_changed(False)
@@ -1385,6 +1584,10 @@ class CardEditorWorkspace(QWidget):
         """복원된 문서 UI 상태의 (목록, 슬롯) 분할 크기를 적용한다."""
         self._open_split_sizes = sizes
         self._apply_current_split()
+
+    def show_notice(self, text: str) -> None:
+        """세션 상태와 무관한 안내를 편집기 상태 표시줄에 남긴다."""
+        self.status_label.setText(text)
 
     def bind_card_open_signal(self, source: object) -> None:
         """CardStreamView의 card_open_requested 같은 신호를 연결한다."""

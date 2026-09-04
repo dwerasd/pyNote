@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -29,10 +31,27 @@ from pynote.application.draft_coordinator import (
     DraftCoordinator,
     DraftDisposition,
 )
+from pynote.application.file_binding_service import (
+    BindingPathStatus,
+    DetectedText,
+    FileSyncOutcome,
+    PendingFileBinding,
+    detect_text,
+    hash_bytes,
+    prepare_binding_path,
+    resolve_path,
+    sync_file,
+)
 from pynote.application.history_service import HistoryService
 from pynote.application.purge_service import PurgeService
 from pynote.application.save_coordinator import SaveCoordinator
-from pynote.domain.models import CaptureOperationSource, Card
+from pynote.domain.models import (
+    CaptureOperationSource,
+    Card,
+    FileBinding,
+    NewlineKind,
+)
+from pynote.domain.paragraph_parser import ParagraphParser
 from pynote.infrastructure.database import Database
 from pynote.infrastructure.export import NewlineFormat, export_cards
 from pynote.infrastructure.repositories import CardCompareAndSwapError, Repositories
@@ -56,11 +75,16 @@ _DROP_MAX_FILES = 20
 _DROP_MAX_TOTAL_BYTES = 4 * 1024 * 1024
 
 
+def _now_us() -> int:
+    return time.time_ns() // 1_000
+
+
 class DocumentPage(QWidget):
     """문서 한 탭의 카드 입력·목록·편집·이력·휴지통을 통합한다."""
 
     content_changed = Signal()
     card_opened = Signal(str)
+    binding_changed = Signal()
 
     def __init__(
         self,
@@ -83,6 +107,8 @@ class DocumentPage(QWidget):
         self._destructive_preflight = destructive_preflight
         self._error_reporter = error_reporter or self._show_error
         self._deferred_open_errors: list[str] | None = None
+        self._paragraph_parser = ParagraphParser()
+        self._pending_binding: PendingFileBinding | None = None
 
         policy = self._policy_store.load()
         idle_seconds = policy.draft_idle_ms / 1_000
@@ -283,6 +309,150 @@ class DocumentPage(QWidget):
         self.reveal_card(card_id)
         return self._open_card(card_id, app_driven=app_driven)
 
+    @property
+    def pending_binding(self) -> PendingFileBinding | None:
+        """카드가 생기면 부착할 결속 대기를 반환한다."""
+        return self._pending_binding
+
+    def open_file(self, path: Path) -> bool:
+        """파일을 카드 한 장에 결속해 연다 — 같은 문서 안의 새 결속만 만든다(2-8).
+
+        이미 결속된 경로의 조회와 교차 문서 라우팅은 액션 소유자인 MainWindow가 한다.
+        """
+        try:
+            with path.open("rb") as source:
+                data = source.read(MAX_IMPORT_FILE_BYTES + 1)
+        except OSError as error:
+            self._error_reporter("파일 열기 실패", f"{path.name}: {error}")
+            return False
+        if len(data) > MAX_IMPORT_FILE_BYTES:
+            self._error_reporter(
+                "파일 열기 실패",
+                f"{path.name}: 파일당 4 MiB 상한을 초과했습니다.",
+            )
+            return False
+
+        detected = detect_text(data)
+        if detected is None:
+            return self._import_rejected_file(path, data)
+
+        # 점유 판정을 이탈 게이트보다 먼저 한다 — 거절될 요청 때문에 현재 세션을 정리하지
+        # 않는다(2-8 3·4).
+        resolved, path_key = resolve_path(path)
+        resolution = prepare_binding_path(self._repositories, path_key)
+        if resolution.status is BindingPathStatus.HELD_BY_ACTIVE_CARD:
+            self._error_reporter(
+                "파일 열기 실패",
+                f"{path.name}: 이미 다른 카드에 결속된 파일입니다.",
+            )
+            return False
+        if not self.can_leave_editor(protect_now=True):
+            return False
+
+        if self._paragraph_parser.is_zero_paragraph_input(detected.text):
+            return self._start_pending_binding(resolved, detected, has_bytes=bool(data))
+
+        card = self._create_card_from_file(path, detected.text)
+        if card is None:
+            return False
+        self._repositories.upsert_file_binding(
+            self._binding_for_opened_file(card.id, resolved, path_key, detected, data)
+        )
+        if not self.open_card(card.id):
+            return False
+        self.binding_changed.emit()
+        return True
+
+    def save_card_as(self) -> bool:
+        """편집 중인 카드를 새 경로에 결속하고 즉시 기록한다(2-7)."""
+        if self.editor.card_id is None:
+            # 카드가 아직 없는 새 입력 세션이면 먼저 확정해 카드를 만든다.
+            self.editor.save_current(interactive=True)
+        card_id = self.editor.card_id
+        if card_id is None:
+            self._error_reporter("다른 이름으로 저장", "저장할 카드가 없습니다.")
+            return False
+        current = self._repositories.get_file_binding(card_id)
+        filename, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "다른 이름으로 저장",
+            "" if current is None else Path(current.path).name,
+            "모든 파일 (*);;텍스트 (*.txt);;Markdown (*.md);;JSON (*.json)",
+        )
+        if not filename:
+            return False
+        # 확장자를 강제하지 않는다 — 내보내기의 _require_text_suffix 와 다른 계약이다.
+        resolved, path_key = resolve_path(Path(filename))
+        holder = self._repositories.find_active_binding_by_path(path_key)
+        if holder is not None and holder.card_id != card_id:
+            self._error_reporter(
+                "다른 이름으로 저장 실패",
+                f"{Path(resolved).name}: 이미 다른 카드에 결속된 파일입니다.",
+            )
+            return False
+        prepare_binding_path(self._repositories, path_key)
+        self._repositories.upsert_file_binding(
+            FileBinding(
+                card_id=card_id,
+                path=resolved,
+                path_key=path_key,
+                encoding="utf-8" if current is None else current.encoding,
+                bom=False if current is None else current.bom,
+                newline=self._default_newline() if current is None else current.newline,
+                trailing_newline=(
+                    False if current is None else current.trailing_newline
+                ),
+                bound_at_us=_now_us(),
+            )
+        )
+        # 결속을 먼저 옮긴 뒤에 확정한다 — 그래야 편집 중인 본문이 이전 파일이 아니라
+        # 새 경로에만 기록된다(S5 의 "이전 파일 불변").
+        if not self.editor.save_current(interactive=True):
+            # 확정 실패(IME 조합 중·리비전 충돌·예외)면 아무것도 바뀌지 않은 상태로 되돌린다 —
+            # 확정 전 본문을 새 파일에 굳히지 않고 결속도 이전 것으로 복원한다.
+            if current is None:
+                self._repositories.delete_file_binding(card_id)
+            else:
+                self._repositories.upsert_file_binding(current)
+            self.binding_changed.emit()
+            self._error_reporter(
+                "다른 이름으로 저장 실패",
+                f"{Path(resolved).name}: 카드를 확정하지 못해 기록하지 않았습니다.",
+            )
+            return False
+        card = self._repositories.get_card(card_id)
+        if card is None:
+            self._error_reporter("다른 이름으로 저장 실패", "카드를 찾지 못했습니다.")
+            return False
+        # QFileDialog 가 덮어쓰기를 이미 확인했으므로 외부 변경 질의를 겹치지 않는다.
+        result = sync_file(
+            self._repositories,
+            card,
+            force=True,
+            interactive=True,
+        )
+        self.binding_changed.emit()
+        if result.outcome is FileSyncOutcome.FAILED:
+            self._error_reporter(
+                "다른 이름으로 저장 실패",
+                f"{Path(resolved).name}: {result.error}",
+            )
+            return False
+        return True
+
+    def unbind_file(self) -> bool:
+        """결속 행만 지운다 — 카드와 파일은 건드리지 않는다(S10)."""
+        card_id = self.editor.card_id
+        if card_id is not None and self._repositories.get_file_binding(card_id):
+            self._repositories.delete_file_binding(card_id)
+            self._pending_binding = None
+            self.binding_changed.emit()
+            return True
+        if self._pending_binding is not None:
+            self._pending_binding = None
+            return True
+        return False
+
     def reveal_card(self, card_id: str) -> bool:
         """카드 행을 선택하고 화면에 보이게 하되 편집면에는 연결하지 않는다."""
         index = self.stream.card_model.index_for_card(card_id)
@@ -328,10 +498,15 @@ class DocumentPage(QWidget):
         protect_now: bool = False,
     ) -> bool:
         """문서·탭·앱 전환이 공유하는 단일 편집면 이탈 게이트를 실행한다."""
-        return self.editor.can_leave_editor(
+        left = self.editor.can_leave_editor(
             choice_provider=choice_provider,
             protect_now=protect_now,
         )
+        if left:
+            # 실제로 떠날 때만 결속 대기를 폐기한다 — 계속 편집을 고르면 대기는 유지되고
+            # 파일은 불변으로 남는다(2-8 5).
+            self._pending_binding = None
+        return left
 
     def protect_now(self) -> bool:
         """단일 편집면의 최신 dirty draft를 즉시 보호한다."""
@@ -610,6 +785,137 @@ class DocumentPage(QWidget):
             )
         self._error_reporter("파일 드롭 실패", "\n\n".join(sections))
 
+    def _import_rejected_file(self, path: Path, data: bytes) -> bool:
+        """결속 불가 파일은 사본 가져오기만 허용한다 — 파일 바이트는 건드리지 않는다."""
+        if not self._ask_copy_import(path):
+            return False
+        try:
+            preparation = prepare_import_from_bytes(path, data)
+        except ValueError as error:
+            self._error_reporter("파일 열기 실패", f"{path.name}: {error}")
+            return False
+        if not self.can_leave_editor(protect_now=True):
+            return False
+        card = self._create_card_from_file(path, preparation.text)
+        return card is not None and self.open_card(card.id)
+
+    def _ask_copy_import(self, path: Path) -> bool:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("결속할 수 없는 파일")
+        box.setText(
+            f"{path.name} 파일은 텍스트로 해석되지 않아 편집 결과를 되쓸 수 없습니다."
+        )
+        box.setInformativeText("사본으로만 가져오시겠습니까?")
+        copy_button = box.addButton("사본 가져오기", QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel_button)
+        box.exec()
+        return box.clickedButton() is copy_button
+
+    def _start_pending_binding(
+        self,
+        resolved: str,
+        detected: DetectedText,
+        *,
+        has_bytes: bool,
+    ) -> bool:
+        """문단이 0개인 파일은 빈 입력기 + 결속 대기로 연다(2-8 5)."""
+        # 열려 있던 카드는 이탈 게이트를 거쳐 닫아야 빈 입력기가 드러난다.
+        if self.editor.card_id is not None and not self.editor.request_close():
+            return False
+        self._pending_binding = PendingFileBinding(
+            path=resolved,
+            encoding=detected.encoding,
+            bom=detected.bom,
+            newline=detected.newline,
+            trailing_newline=detected.trailing_newline,
+        )
+        self.focus_editor()
+        if has_bytes:
+            self.editor_workspace.show_notice(
+                "원본 공백 내용은 첫 저장 때 대체됩니다"
+            )
+        return True
+
+    def _create_card_from_file(self, path: Path, text: str) -> Card | None:
+        try:
+            created = self.card_service.create_cards(
+                self.document_id,
+                text,
+                source=CaptureOperationSource.IMPORT,
+                split=False,
+            )
+        except BaseException as error:
+            LOGGER.exception("연 파일로 카드를 만들지 못했습니다: %s", path)
+            self._error_reporter("파일 열기 실패", f"{path.name}: {error}")
+            return None
+        if len(created) != 1:
+            self._error_reporter(
+                "파일 열기 실패",
+                f"{path.name}: 카드가 정확히 한 장 생성되지 않았습니다.",
+            )
+            return None
+        card = created[0]
+        self.stream.card_model.add_cards((card,), revision_counts={card.id: 1})
+        self.history.refresh()
+        self.content_changed.emit()
+        return card
+
+    def _binding_for_opened_file(
+        self,
+        card_id: str,
+        resolved: str,
+        path_key: str,
+        detected: DetectedText,
+        data: bytes,
+    ) -> FileBinding:
+        try:
+            mtime_ns = Path(resolved).stat().st_mtime_ns
+        except OSError:
+            LOGGER.warning("결속 파일 상태를 읽지 못했습니다: %s", resolved)
+            mtime_ns = None
+        now_us = _now_us()
+        return FileBinding(
+            card_id=card_id,
+            path=resolved,
+            path_key=path_key,
+            encoding=detected.encoding,
+            bom=detected.bom,
+            newline=detected.newline,
+            trailing_newline=detected.trailing_newline,
+            bound_at_us=now_us,
+            synced_size=len(data),
+            synced_mtime_ns=mtime_ns,
+            synced_hash=hash_bytes(data),
+            synced_at_us=now_us,
+        )
+
+    def _promote_pending_binding(self, card: Card) -> None:
+        """첫 카드가 생기면 결속 대기를 부착한다 — 파일은 아직 쓰지 않는다(2-8)."""
+        pending = self._pending_binding
+        if pending is None:
+            return
+        # 대기를 먼저 비워 같은 카드에 결속이 두 번 만들어지지 않게 한다.
+        self._pending_binding = None
+        self._repositories.upsert_file_binding(
+            FileBinding(
+                card_id=card.id,
+                path=pending.path,
+                path_key=pending.path_key,
+                encoding=pending.encoding,
+                bom=pending.bom,
+                newline=pending.newline,
+                trailing_newline=pending.trailing_newline,
+                bound_at_us=_now_us(),
+            )
+        )
+        self.binding_changed.emit()
+
+    @staticmethod
+    def _default_newline() -> NewlineKind:
+        return NewlineKind.CRLF if sys.platform == "win32" else NewlineKind.LF
+
     def _move_card(self, card_id: str, before_card_id: object) -> None:
         if not self._can_run_destructive_command():
             return
@@ -881,10 +1187,14 @@ class DocumentPage(QWidget):
             (value,),
             revision_counts={value.id: 1},
         )
+        self._promote_pending_binding(value)
         self.history.refresh()
         self.content_changed.emit()
 
     def _card_connected(self, card_id: str) -> None:
+        # 대기 승격은 card_created 가 먼저 처리한다 — 여기 남은 대기는 다른 카드를
+        # 열어 버려진 것이다.
+        self._pending_binding = None
         if not self.reveal_card(card_id):
             # 필터로 목록 행이 가려진 생성 카드도 이력 대상은 갱신한다.
             self.history.set_card(card_id)
