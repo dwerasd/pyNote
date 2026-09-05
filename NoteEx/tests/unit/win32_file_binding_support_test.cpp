@@ -1,6 +1,7 @@
 ﻿#include <catch_amalgamated.hpp>
 
 #include "pynote/platform/win32_file_binding_support.h"
+#include "pynote/platform/win32_import_support.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -220,4 +221,26 @@ TEST_CASE("결속 파일 계층은 부재·상태·임시 이름·교체를 원�
 	REQUIRE_FALSE(bReplaced);
 	REQUIRE(Files.LastError().find("5") != std::string::npos);
 	REQUIRE(Files.Remove(sSecond));
+}
+
+// 원본 open("rb") 는 다른 프로그램이 쓰기로 잡은 파일도 읽는다(_SH_DENYNO). 기동 인자 경로가
+// 로그 기록기·편집기에 점유돼 있어도 결속돼야 하므로 읽기 공유 모드가 그와 같아야 한다(P2 감사 1-1).
+TEST_CASE("쓰기로 점유된 파일도 상한 읽기가 연다", "[W2-file-binding][FS-port]")
+{
+	C_TEMP_DIR       Temp("shared_read");
+	const std::string sTarget = Temp.File("held.txt");
+	{
+		std::ofstream Seed(std::filesystem::path(sTarget), std::ios::binary);
+		Seed << "held body\r\n";
+	}
+	const HANDLE hHolder = ::CreateFileW(std::filesystem::path(sTarget).c_str(), GENERIC_WRITE,
+		FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	REQUIRE(hHolder != INVALID_HANDLE_VALUE);
+
+	std::vector<std::uint8_t> Bytes;
+	std::string               sError;
+	const bool bRead = pynote::platform::ReadFileBounded(sTarget, 1024, &Bytes, &sError);
+	::CloseHandle(hHolder);
+	REQUIRE(bRead);
+	REQUIRE(Bytes == to_bytes("held body\r\n"));
 }

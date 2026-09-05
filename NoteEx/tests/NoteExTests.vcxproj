@@ -128,6 +128,7 @@
     <ClCompile Include="unit\backup_split_test.cpp" />
     <ClCompile Include="unit\win32_device_settings_test.cpp" />
     <ClCompile Include="unit\win32_single_instance_test.cpp" />
+    <ClCompile Include="unit\win32_single_instance_open_file_test.cpp" />
     <ClCompile Include="unit\window_lifecycle_test.cpp" />
     <!-- platform 계층은 별도 프로젝트가 아니라 소유 경계다. 필요한 프로젝트가 직접 컴파일한다
          (하네스 소스와 같은 방식). -->
@@ -157,6 +158,7 @@
 	<ClCompile Include="harness\src\w4_card_select_test.cpp" />
 	<ClCompile Include="harness\src\w4_card_wheel_test.cpp" />
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp" />
+	<ClCompile Include="harness\src\w3_file_open_launch_test.cpp" />
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">
       <!-- 상류 원본이라 경고를 손대지 않는다. -->
       <WarningLevel>TurnOffAllWarnings</WarningLevel>

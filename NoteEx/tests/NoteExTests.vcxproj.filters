@@ -192,6 +192,9 @@
     <ClCompile Include="unit\win32_single_instance_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\win32_single_instance_open_file_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\window_lifecycle_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
@@ -271,6 +274,9 @@
 	  <Filter>하네스</Filter>
 	</ClCompile>
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
+	<ClCompile Include="harness\src\w3_file_open_launch_test.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
     <ClCompile Include="..\third_party\catch2\catch_amalgamated.cpp">

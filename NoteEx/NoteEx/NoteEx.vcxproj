@@ -282,6 +282,7 @@
     <ClCompile Include="..\platform\src\win32_device_settings.cpp" />
     <ClCompile Include="..\platform\src\win32_file_binding_support.cpp" />
     <ClCompile Include="..\platform\src\win32_file_system.cpp" />
+    <ClCompile Include="..\platform\src\win32_import_support.cpp" />
     <ClCompile Include="..\platform\src\win32_single_instance.cpp" />
     <ClCompile Include="..\platform\src\win32_time_zone_resolver.cpp" />
   </ItemGroup>

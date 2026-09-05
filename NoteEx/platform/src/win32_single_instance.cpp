@@ -1,4 +1,4 @@
-#include "pynote/platform/win32_single_instance.h"
+﻿#include "pynote/platform/win32_single_instance.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +10,15 @@
 #include <aclapi.h>
 #include <bcrypt.h>
 #include <shlobj.h>
+
+// windows.h 의 CreateEvent 매크로는 repositories.h 의 멤버 이름을 바꾼다 - 결속 경로 확정을
+// 위해 core 를 끌고 오는 아래 헤더보다 먼저 걷는다(CDocumentPage.cpp·w3_shell_consumer_test.cpp
+// 의 순서 계약과 같다). 이 TU 는 ATL/WTL 을 읽지 않으므로 앞에서 걷어도 잃을 식별자가 없다.
+#ifdef CreateEvent
+#undef CreateEvent
+#endif
+
+#include "pynote/platform/win32_file_binding_support.h"
 
 #include <array>
 #include <cstdint>
@@ -30,7 +39,97 @@ namespace
 	constexpr wchar_t MUTEX_PREFIX[] = L"Local\\pyNote.NoteEx.";
 	constexpr wchar_t PIPE_PREFIX[] = L"\\\\.\\pipe\\pyNote.NoteEx.";
 	constexpr char NEW_WINDOW_FRAME[] = "new-window";
-	constexpr std::size_t MAX_FRAME_BYTES = 4096;
+	constexpr char NEW_WINDOW_COMMAND[] = "new-window\n";
+	// 원본 _OPEN_FILE_PREFIX(app.py:60). 탭·개행이 든 파일명이 줄 프로토콜을 깨지 않게
+	// 뒤에 base64url 을 싣는다.
+	constexpr std::string_view OPEN_FILE_PREFIX = "open-file\t";
+	// 경로 32767자 x UTF-8 최대 3바이트 -> base64 약 131 KiB 라 한 프레임을 그만큼 받는다.
+	// 명명 파이프 버퍼(CreateNamedPipeW 의 4096)는 바이트 모드의 힌트일 뿐이라 함께 올리지 않는다.
+	constexpr std::size_t MAX_FRAME_BYTES = 140000;
+	constexpr char BASE64URL_ALPHABET[] =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+	// 원본 base64.urlsafe_b64encode(app.py:167). 패딩 '=' 를 유지한다.
+	std::string base64url_encode(const std::string& _sBytes)
+	{
+		std::string sResult;
+		sResult.reserve((_sBytes.size() + 2) / 3 * 4);
+		std::size_t i = 0;
+		while (i + 2 < _sBytes.size())
+		{
+			const std::uint32_t nGroup =
+				(static_cast<std::uint8_t>(_sBytes[i]) << 16) |
+				(static_cast<std::uint8_t>(_sBytes[i + 1]) << 8) |
+				static_cast<std::uint8_t>(_sBytes[i + 2]);
+			sResult.push_back(BASE64URL_ALPHABET[(nGroup >> 18) & 0x3F]);
+			sResult.push_back(BASE64URL_ALPHABET[(nGroup >> 12) & 0x3F]);
+			sResult.push_back(BASE64URL_ALPHABET[(nGroup >> 6) & 0x3F]);
+			sResult.push_back(BASE64URL_ALPHABET[nGroup & 0x3F]);
+			i += 3;
+		}
+		const std::size_t nRemaining = _sBytes.size() - i;
+		if (nRemaining == 0) { return(sResult); }
+		std::uint32_t nGroup = static_cast<std::uint8_t>(_sBytes[i]) << 16;
+		if (nRemaining == 2) { nGroup |= static_cast<std::uint8_t>(_sBytes[i + 1]) << 8; }
+		sResult.push_back(BASE64URL_ALPHABET[(nGroup >> 18) & 0x3F]);
+		sResult.push_back(BASE64URL_ALPHABET[(nGroup >> 12) & 0x3F]);
+		sResult.push_back(nRemaining == 2 ? BASE64URL_ALPHABET[(nGroup >> 6) & 0x3F] : '=');
+		sResult.push_back('=');
+		return(sResult);
+	}
+
+	int base64url_value(const char _ch)
+	{
+		if (_ch >= 'A' && _ch <= 'Z') { return(_ch - 'A'); }
+		if (_ch >= 'a' && _ch <= 'z') { return(_ch - 'a' + 26); }
+		if (_ch >= '0' && _ch <= '9') { return(_ch - '0' + 52); }
+		if (_ch == '-') { return(62); }
+		if (_ch == '_') { return(63); }
+		return(-1);
+	}
+
+	// 원본 base64.urlsafe_b64decode(app.py:270). 알파벳 밖 문자를 버리는 것까지는 원본
+	// (validate=False)과 같고 - "%%%" 가 오류가 아니라 빈 경로가 되는 갈래가 이 순서에서
+	// 나온다(원본은 그 빈 값을 :271 에서 걸러낸다) - 패딩 판정은 원본보다 엄격하다(원본은 유효
+	// 패딩열에서 조기 종료한다). 제품 클라이언트가 만들지 않는 이형이라 좁게 둔다(P2 감사 1-2).
+	bool base64url_decode(const std::string_view _sEncoded, std::string* _psBytes)
+	{
+		std::string sFiltered;
+		sFiltered.reserve(_sEncoded.size());
+		for (const char ch : _sEncoded)
+		{
+			if (ch == '=' || base64url_value(ch) >= 0) { sFiltered.push_back(ch); }
+		}
+		if (sFiltered.size() % 4 != 0) { return(false); }
+		_psBytes->clear();
+		for (std::size_t i = 0; i < sFiltered.size(); i += 4)
+		{
+			int Values[4] = { 0, 0, 0, 0 };
+			int nData = 0;
+			for (int j = 0; j < 4; ++j)
+			{
+				const char ch = sFiltered[i + j];
+				if (ch == '=')
+				{
+					// 패딩은 마지막 그룹의 꼬리에서만 성립한다.
+					if (i + 4 != sFiltered.size() || j < 2) { return(false); }
+					continue;
+				}
+				if (nData != j) { return(false); }
+				Values[j] = base64url_value(ch);
+				++nData;
+			}
+			if (nData < 2) { return(false); }
+			const std::uint32_t nGroup = (static_cast<std::uint32_t>(Values[0]) << 18) |
+				(static_cast<std::uint32_t>(Values[1]) << 12) |
+				(static_cast<std::uint32_t>(Values[2]) << 6) |
+				static_cast<std::uint32_t>(Values[3]);
+			_psBytes->push_back(static_cast<char>((nGroup >> 16) & 0xFF));
+			if (nData >= 3) { _psBytes->push_back(static_cast<char>((nGroup >> 8) & 0xFF)); }
+			if (nData == 4) { _psBytes->push_back(static_cast<char>(nGroup & 0xFF)); }
+		}
+		return(true);
+	}
 
 	std::wstring win32_error(const std::wstring_view _sAction, const DWORD _nCode)
 	{
@@ -64,6 +163,21 @@ namespace
 		return(::WideCharToMultiByte(
 			CP_UTF8, WC_ERR_INVALID_CHARS, _sSource.data(), nSource,
 			_psResult->data(), nRequired, nullptr, nullptr) == nRequired);
+	}
+
+	// 원본 bytes.decode("utf-8") strict 자리다(app.py:270). 실패하면 프레임을 버린다.
+	bool wide_strict(const std::string& _sSource, std::wstring* _psResult)
+	{
+		if (_sSource.empty()) { _psResult->clear(); return(true); }
+		if (_sSource.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) { return(false); }
+		const int nSource = static_cast<int>(_sSource.size());
+		const int nRequired = ::MultiByteToWideChar(
+			CP_UTF8, MB_ERR_INVALID_CHARS, _sSource.data(), nSource, nullptr, 0);
+		if (nRequired <= 0) { return(false); }
+		_psResult->assign(static_cast<std::size_t>(nRequired), L'\0');
+		return(::MultiByteToWideChar(
+			CP_UTF8, MB_ERR_INVALID_CHARS, _sSource.data(), nSource,
+			_psResult->data(), nRequired) == nRequired);
 	}
 
 	bool full_path(const std::wstring& _sPath, std::wstring* _psResult, std::wstring* _psError)
@@ -219,7 +333,8 @@ namespace
 		Denied,
 	};
 
-	E_NOTIFY_RESULT notify_pipe_once(const std::wstring& _sPipeName, DWORD* _pnError)
+	E_NOTIFY_RESULT notify_pipe_once(
+		const std::wstring& _sPipeName, const std::string& _sCommand, DWORD* _pnError)
 	{
 		const HANDLE hPipe = ::CreateFileW(
 			_sPipeName.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -232,12 +347,11 @@ namespace
 			}
 			return(E_NOTIFY_RESULT::Denied);
 		}
-		constexpr char COMMAND[] = "new-window\n";
 		DWORD nWritten = 0;
 		const BOOL bWritten = ::WriteFile(
-			hPipe, COMMAND, static_cast<DWORD>(sizeof(COMMAND) - 1), &nWritten, nullptr);
+			hPipe, _sCommand.data(), static_cast<DWORD>(_sCommand.size()), &nWritten, nullptr);
 		const bool bCompleteWrite = bWritten != FALSE &&
-			nWritten == static_cast<DWORD>(sizeof(COMMAND) - 1);
+			nWritten == static_cast<DWORD>(_sCommand.size());
 		BOOL bFlushed = FALSE;
 		if (bCompleteWrite) { bFlushed = ::FlushFileBuffers(hPipe); }
 		if (bWritten == FALSE) { *_pnError = ::GetLastError(); }
@@ -278,6 +392,8 @@ namespace pynote::platform
 		std::mutex HandlerMutex;
 		NEW_WINDOW_HANDLER Handler;
 		std::size_t nPendingRequests{ 0 };
+		OPEN_FILE_HANDLER OpenFileHandler;
+		std::vector<std::wstring> PendingPaths;
 
 		C_CURRENT_USER_SECURITY Security;
 		HANDLE hMutex{ nullptr };
@@ -311,9 +427,39 @@ namespace pynote::platform
 			catch (...) { SetError(L"new-window handler threw an exception"); }
 		}
 
+		void DispatchOpenFile(std::wstring _sPath)
+		{
+			OPEN_FILE_HANDLER Copy;
+			{
+				const std::lock_guard Lock(HandlerMutex);
+				if (!OpenFileHandler) { PendingPaths.push_back(std::move(_sPath)); return; }
+				Copy = OpenFileHandler;
+			}
+			try { Copy(std::move(_sPath)); }
+			catch (...) { SetError(L"open-file handler threw an exception"); }
+		}
+
+		// 원본 _handle_command(app.py:258~272). 미지 프레임은 무시하고, base64 해독 실패·
+		// UTF-8 해독 실패·빈 경로도 무시한다(원본은 ValueError 한 갈래가 두 오류를 함께 삼킨다).
+		void DispatchFrame(const std::string& _sFrame)
+		{
+			if (_sFrame == NEW_WINDOW_FRAME) { this->DispatchNewWindow(); return; }
+			const std::string_view sFrame(_sFrame);
+			if (!sFrame.starts_with(OPEN_FILE_PREFIX)) { return; }
+			std::string sDecoded;
+			if (!base64url_decode(sFrame.substr(OPEN_FILE_PREFIX.size()), &sDecoded)) { return; }
+			if (sDecoded.empty()) { return; }
+			std::wstring sPath;
+			if (!wide_strict(sDecoded, &sPath) || sPath.empty()) { return; }
+			this->DispatchOpenFile(std::move(sPath));
+		}
+
 		void ServeClient(HANDLE _hPipe)
 		{
 			std::string sFrame;
+			// 상한에 닿은 프레임은 그 프레임만 버리고 다음 개행까지 소비한다 - 한 연결에 여러
+			// 줄이 실리므로 연결을 통째로 접으면 앞의 과대 프레임이 뒤의 정상 경로를 죽인다.
+			bool bDropping = false;
 			std::array<char, 4> Buffer{};
 			for (;;)
 			{
@@ -335,10 +481,19 @@ namespace pynote::platform
 					const char ch = Buffer[i];
 					if (ch == '\n')
 					{
-						if (sFrame == NEW_WINDOW_FRAME) { DispatchNewWindow(); }
-						return;
+						// 원본 _read_client(app.py:248~256) - 연결의 모든 줄을 처리한다.
+						if (!bDropping) { this->DispatchFrame(sFrame); }
+						sFrame.clear();
+						bDropping = false;
+						continue;
 					}
-					if (sFrame.size() == MAX_FRAME_BYTES) { return; }
+					if (bDropping) { continue; }
+					if (sFrame.size() == MAX_FRAME_BYTES)
+					{
+						bDropping = true;
+						sFrame.clear();
+						continue;
+					}
 					sFrame.push_back(ch);
 				}
 			}
@@ -429,11 +584,31 @@ namespace pynote::platform
 			return(false);
 		}
 		_pOptions->sDatabasePath.clear();
+		// 기존 W3-I1-001 이 옵션 구조체 하나를 여섯 번 재사용하므로 진입 시 비운다
+		// (sDatabasePath 와 같은 관례).
+		_pOptions->Paths.clear();
 		_psError->clear();
 		bool bDatabaseSeen = false;
 		for (int i = 1; i < _nArgumentCount; ++i)
 		{
 			const std::wstring_view sArgument(_ppArguments[i] ? _ppArguments[i] : L"");
+			// 원본 argparse 의 positional paths 다. 하이픈으로 시작하는 토큰은 여전히 옵션
+			// 자리이므로(app.py:1143~1162) --database 계열이 아니면 오류로 남는다.
+			if (!sArgument.starts_with(L'-'))
+			{
+				// 원본은 경로 확정 실패를 기동 실패로 올리지 않는다(빈 인자도 창을 세우고 경고만
+				// 낸다, app.py:96·:702~711) - 변환·확정에 실패한 인자만 버리고 나머지를 연다
+				// (P2 감사 1-4).
+				std::string sUtf8Argument;
+				if (!utf8(std::wstring(sArgument), &sUtf8Argument)) { continue; }
+				std::string sResolved;
+				std::string sPathKey;
+				if (!ResolveBindingPath(sUtf8Argument, &sResolved, &sPathKey)) { continue; }
+				std::wstring sWideResolved;
+				if (!wide_strict(sResolved, &sWideResolved)) { continue; }
+				_pOptions->Paths.push_back(std::move(sWideResolved));
+				continue;
+			}
 			std::wstring sValue;
 			if (sArgument == L"--database")
 			{
@@ -498,7 +673,7 @@ namespace pynote::platform
 	C_WIN32_SINGLE_INSTANCE::~C_WIN32_SINGLE_INSTANCE() { this->Close(); }
 
 	C_WIN32_SINGLE_INSTANCE::E_ACQUIRE_RESULT C_WIN32_SINGLE_INSTANCE::Acquire(
-		const std::wstring& _sDatabasePath)
+		const std::wstring& _sDatabasePath, const std::vector<std::wstring>& _Paths)
 	{
 		this->Close();
 		m_pState->SetError(L"");
@@ -513,8 +688,24 @@ namespace pynote::platform
 		m_pState->sMutexName = std::wstring(MUTEX_PREFIX) + sIdentity + L".mutex";
 		m_pState->sPipeName = std::wstring(PIPE_PREFIX) + sIdentity;
 
+		// 원본 launch_message(app.py:162~170) - 경로가 있으면 경로마다 한 줄, 없으면 새 창 한 줄이다.
+		std::string sCommand;
+		for (const std::wstring& sPath : _Paths)
+		{
+			std::string sUtf8Path;
+			if (!utf8(sPath, &sUtf8Path))
+			{
+				m_pState->SetError(L"launch path is not representable in UTF-8");
+				return(E_ACQUIRE_RESULT::Failure);
+			}
+			sCommand.append(OPEN_FILE_PREFIX);
+			sCommand.append(base64url_encode(sUtf8Path));
+			sCommand.push_back('\n');
+		}
+		if (sCommand.empty()) { sCommand = NEW_WINDOW_COMMAND; }
+
 		DWORD nNotifyError = ERROR_SUCCESS;
-		E_NOTIFY_RESULT eNotify = notify_pipe_once(m_pState->sPipeName, &nNotifyError);
+		E_NOTIFY_RESULT eNotify = notify_pipe_once(m_pState->sPipeName, sCommand, &nNotifyError);
 		if (eNotify == E_NOTIFY_RESULT::Notified) { return(E_ACQUIRE_RESULT::SecondaryNotified); }
 		if (eNotify == E_NOTIFY_RESULT::Denied)
 		{
@@ -542,7 +733,7 @@ namespace pynote::platform
 			for (const DWORD nDelay : { 25UL, 50UL })
 			{
 				::Sleep(nDelay);
-				eNotify = notify_pipe_once(m_pState->sPipeName, &nNotifyError);
+				eNotify = notify_pipe_once(m_pState->sPipeName, sCommand, &nNotifyError);
 				if (eNotify == E_NOTIFY_RESULT::Notified) { return(E_ACQUIRE_RESULT::SecondaryNotified); }
 				if (eNotify == E_NOTIFY_RESULT::Denied) { break; }
 			}
@@ -594,6 +785,26 @@ namespace pynote::platform
 		}
 	}
 
+	void C_WIN32_SINGLE_INSTANCE::SetOpenFileHandler(OPEN_FILE_HANDLER _Handler)
+	{
+		std::vector<std::wstring> Pending;
+		OPEN_FILE_HANDLER Copy;
+		{
+			const std::lock_guard Lock(m_pState->HandlerMutex);
+			m_pState->OpenFileHandler = std::move(_Handler);
+			if (m_pState->OpenFileHandler)
+			{
+				Copy = m_pState->OpenFileHandler;
+				Pending = std::exchange(m_pState->PendingPaths, {});
+			}
+		}
+		for (std::wstring& sPath : Pending)
+		{
+			try { Copy(std::move(sPath)); }
+			catch (...) { m_pState->SetError(L"open-file handler threw an exception"); }
+		}
+	}
+
 	void C_WIN32_SINGLE_INSTANCE::Close()
 	{
 		if (!m_pState) { return; }
@@ -609,6 +820,8 @@ namespace pynote::platform
 		const std::lock_guard Lock(m_pState->HandlerMutex);
 		m_pState->Handler = {};
 		m_pState->nPendingRequests = 0;
+		m_pState->OpenFileHandler = {};
+		m_pState->PendingPaths.clear();
 	}
 
 	std::wstring C_WIN32_SINGLE_INSTANCE::LastError() const

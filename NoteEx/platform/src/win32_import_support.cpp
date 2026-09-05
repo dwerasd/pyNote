@@ -1,4 +1,4 @@
-#include "pynote/platform/win32_import_support.h"
+﻿#include "pynote/platform/win32_import_support.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -44,7 +44,10 @@ namespace pynote::platform
 		_pOut->clear();
 		const std::wstring path = utf8_to_wide(_sUtf8Path);
 		if (path.empty() && !_sUtf8Path.empty()) { *_psError = "invalid UTF-8 path"; return false; }
-		HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+		// 원본 open("rb") 는 CPython 의 _SH_DENYNO(FILE_SHARE_READ | FILE_SHARE_WRITE) 라 다른 프로그램이
+		// 쓰기로 잡은 파일도 읽는다 - FILE_SHARE_READ 단독은 err=32 로 거부한다(P2 감사 1-1 실측).
+		HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
 			FILE_ATTRIBUTE_NORMAL, nullptr);
 		if (file == INVALID_HANDLE_VALUE) { *_psError = "CreateFileW failed: " + std::to_string(::GetLastError()); return false; }
 		std::uint8_t buffer[64 * 1024];

@@ -42,6 +42,9 @@ namespace
 	constexpr wchar_t DISPATCHER_CLASS[] = L"NoteExApplicationDispatcher";
 	constexpr UINT WM_NOTEEX_NEW_WINDOW = WM_APP + 20;
 	constexpr UINT WM_NOTEEX_RETIRE_WINDOWS = WM_APP + 21;
+	// 같은 디스패처 HWND·같은 창 프로시저를 공유하므로 위 둘을 재사용하지 않는다 - 창 은퇴
+	// 포스트의 lParam 0 이 std::wstring* 로 해석되면 프로세스가 죽는다.
+	constexpr UINT WM_NOTEEX_OPEN_FILE = WM_APP + 22;
 	constexpr UINT_PTR MAINTENANCE_TIMER_ID = 1;
 
 	std::string utf8(const std::wstring& _sValue)
@@ -98,6 +101,10 @@ struct CApplication::S_STATE : CMessageFilter
 	pynote::platform::C_WIN32_FILE_SYSTEM FileSystem;
 	pynote::platform::C_WIN32_DEVICE_SETTINGS Settings{ FileSystem };
 	pynote::platform::C_WIN32_SINGLE_INSTANCE Instance;
+	// 결속 행의 synced_mtime_ns 를 읽는 자리다. 되쓰기는 W6 이므로 여기서는 Stat 만 쓴다.
+	pynote::platform::C_WIN32_BINDING_FILE_SYSTEM BindingFileSystem;
+	// 기동 경로 안내의 seam. 결선 기본값은 MessageBoxW 이고 비대화형 구동은 대역을 끼운다.
+	std::function<void(const std::wstring&, const std::wstring&)> DialogSink;
 	pynote::core::storage::C_DATABASE Database;
 	pynote::core::storage::C_BACKUP_SERVICE BackupService{ FileSystem };
 	std::unique_ptr<pynote::core::storage::C_MIGRATION_BACKUP_HOOK> MigrationBackup;
@@ -262,6 +269,13 @@ struct CApplication::S_STATE : CMessageFilter
 			pState->retire_pending();
 			return(0);
 		}
+		if (_uMessage == WM_NOTEEX_OPEN_FILE)
+		{
+			// 파이프 스레드가 heap 으로 넘긴 경로다 - 소유권을 여기서 회수한다.
+			const std::unique_ptr<std::wstring> pPath(reinterpret_cast<std::wstring*>(_lParam));
+			if (pPath && pState->bAcceptNewWindows.load()) { pState->open_path(*pPath); }
+			return(0);
+		}
 		if (_uMessage == WM_TIMER && _wParam == MAINTENANCE_TIMER_ID)
 		{
 			pState->pOwner->RunAutomaticMaintenance();
@@ -348,7 +362,8 @@ struct CApplication::S_STATE : CMessageFilter
 	}
 
 	bool create_native_window(
-		const std::string& _sWorkspaceId, const std::string& _sDocumentId, bool _bDeleteRecordOnFailure)
+		const std::string& _sWorkspaceId, const std::string& _sDocumentId, bool _bDeleteRecordOnFailure,
+		pynote::core::application::WINDOW_TOKEN* _pToken = nullptr)
 	{
 		const std::string sGeometryKey = pynote::shell::WindowGeometryKey(_sWorkspaceId);
 		if (sGeometryKey.empty()) { return(false); }
@@ -383,6 +398,7 @@ struct CApplication::S_STATE : CMessageFilter
 		if (Window->Init(
 			hInstance, pOwner, Token, _sWorkspaceId, _sDocumentId, sTitle, bFirstGeometry))
 		{
+			if (_pToken) { *_pToken = Token; }
 			return(true);
 		}
 		Registry.ReleaseOwnership(Token);
@@ -406,7 +422,9 @@ struct CApplication::S_STATE : CMessageFilter
 		}
 	}
 
-	bool create_new_window()
+	bool create_new_window(
+		std::string* _psDocumentId = nullptr,
+		pynote::core::application::WINDOW_TOKEN* _pToken = nullptr)
 	{
 		if (!bAcceptNewWindows.load() || !Lifecycle.AcceptsNewWindows()) { return(false); }
 		this->protect_windows_quietly();
@@ -428,7 +446,9 @@ struct CApplication::S_STATE : CMessageFilter
 		{
 			return(false);
 		}
-		return(this->create_native_window(sWorkspaceId, *DocumentId, true));
+		if (!this->create_native_window(sWorkspaceId, *DocumentId, true, _pToken)) { return(false); }
+		if (_psDocumentId) { *_psDocumentId = *DocumentId; }
+		return(true);
 	}
 
 	bool restore_windows()
@@ -555,6 +575,87 @@ struct CApplication::S_STATE : CMessageFilter
 		return(Registry.Activate(_Token));
 	}
 
+	// 원본 _report_path_open_failure 의 부모 규칙(app.py:709) - 첫 번째 살아 있는 창이고
+	// 없으면 무부모다.
+	HWND dialog_parent()
+	{
+		for (const auto& Window : Registry.Snapshot())
+		{
+			const auto it = Windows.find(Window.Token);
+			if (it != Windows.end() && it->second && ::IsWindow(it->second->m_hWnd))
+			{
+				return(it->second->m_hWnd);
+			}
+		}
+		return(nullptr);
+	}
+
+	// 원본 _binding_owner_window + _window_for_request + _open_bound_card(app.py:686~700,
+	// ui/main_window.py:1243~1253) 의 포팅 가능한 부분이다 - 목록 선택까지이고 편집기 열기는 W6 다.
+	bool route_bound_card(const std::string& _sCardId)
+	{
+		pynote::core::domain::S_CARD Card;
+		if (Repositories->GetCard(_sCardId, &Card) != pynote::core::storage::E_REPO_RESULT::Ok)
+		{
+			return(false);
+		}
+		if (Card.nDeletedAtUs) { return(false); }
+		if (!this->refresh_document_mapping()) { return(false); }
+		pynote::core::application::WINDOW_TOKEN Requesting = 0;
+		const auto itOwner = DocumentWindows.find(Card.sDocumentId);
+		if (itOwner != DocumentWindows.end()) { Requesting = itOwner->second; }
+		else
+		{
+			const auto Snapshot = Registry.Snapshot();
+			if (!Snapshot.empty()) { Requesting = Snapshot.back().Token; }
+		}
+		// CEILING: 창이 0개면 원본은 create_window 로 요청 창을 만든다(app.py:700) - 포팅본은
+		// restore_windows 가 최소 1창을 보장한다는 전제에 기대 실패로 접는다(P2 감사 1-5).
+		if (Requesting == 0) { return(false); }
+		// CEILING: 결속 카드의 문서를 연 창이 없으면 제자리 문서 전환이 필요하고 그것은 W7
+		// 소유다(OpenDocument 가 false 로 돌린다) - 그때는 창을 만들지 않고 실패로 접는다.
+		if (!pOwner->OpenDocument(Requesting, Card.sDocumentId)) { return(false); }
+		if (!this->refresh_document_mapping()) { return(false); }
+		const auto itSettled = DocumentWindows.find(Card.sDocumentId);
+		if (itSettled == DocumentWindows.end()) { return(false); }
+		const auto it = Windows.find(itSettled->second);
+		if (it == Windows.end() || !it->second) { return(false); }
+		if (!it->second->DocumentPage().RevealCard(_sCardId)) { return(false); }
+		return(this->activate_window(itSettled->second));
+	}
+
+	// 기동 인자·파이프 수신 경로의 결선이다. 판정은 CApplication.h 의 ResolveOpenPath 가 갖는다.
+	bool open_path(const std::wstring& _sPath)
+	{
+		if (!Repositories || !CardService) { return(false); }
+		pynote::core::application::WINDOW_TOKEN CreatedToken = 0;
+		S_OPEN_PATH_SHELL Shell;
+		Shell.ShowDialog = [this](const std::wstring& _sTitle, const std::wstring& _sText)
+		{
+			if (DialogSink) { DialogSink(_sTitle, _sText); }
+		};
+		Shell.RouteBoundCard = [this](const std::string& _sCardId)
+		{
+			return(this->route_bound_card(_sCardId));
+		};
+		Shell.CreateWindowForFile = [this, &CreatedToken](std::string* _psDocumentId)
+		{
+			return(this->create_new_window(_psDocumentId, &CreatedToken));
+		};
+		Shell.RevealAndActivate = [this, &CreatedToken](const std::string& _sCardId)
+		{
+			const auto it = Windows.find(CreatedToken);
+			if (it == Windows.end() || !it->second) { return(false); }
+			// 창이 선 뒤에 만든 카드라 목록을 다시 읽어야 행이 생긴다(원본 add_cards 자리).
+			if (!it->second->DocumentPage().Refresh()) { return(false); }
+			if (!it->second->DocumentPage().RevealCard(_sCardId)) { return(false); }
+			return(this->activate_window(CreatedToken));
+		};
+		Shell.Now = []() { return(now_us()); };
+		return(ResolveOpenPath(
+			_sPath, *Repositories, *CardService, ParagraphParser, BindingFileSystem, Shell));
+	}
+
 	// 원본 _prepare_window_for_input(app.py:860~) - 열 수 있는 문서가 없으면 만든다.
 	std::optional<std::string> choose_refill_document(
 		pynote::core::application::WINDOW_TOKEN _Token)
@@ -605,6 +706,7 @@ struct CApplication::S_STATE : CMessageFilter
 		this->stop_maintenance_timer();
 		bAcceptNewWindows.store(false);
 		Instance.SetNewWindowHandler({});
+		Instance.SetOpenFileHandler({});
 		BrushCache.Shutdown();
 		TextEngine.Shutdown();
 		D2DDevice.Shutdown();
@@ -639,6 +741,12 @@ CApplication::CApplication()
 	: m_pState(std::make_unique<S_STATE>())
 {
 	m_pState->pOwner = this;
+	m_pState->DialogSink = [State = m_pState.get()](
+		const std::wstring& _sTitle, const std::wstring& _sText)
+	{
+		::MessageBoxW(State->dialog_parent(), _sText.c_str(), _sTitle.c_str(),
+			MB_OK | MB_ICONWARNING | MB_APPLMODAL);
+	};
 }
 
 CApplication::~CApplication()
@@ -650,7 +758,7 @@ CApplication::E_INITIALIZE_RESULT CApplication::Initialize(
 	HINSTANCE _hInstance, const pynote::platform::S_WIN32_STARTUP_OPTIONS& _Options)
 {
 	m_pState->hInstance = _hInstance;
-	const auto eAcquire = m_pState->Instance.Acquire(_Options.sDatabasePath);
+	const auto eAcquire = m_pState->Instance.Acquire(_Options.sDatabasePath, _Options.Paths);
 	if (eAcquire == pynote::platform::C_WIN32_SINGLE_INSTANCE::E_ACQUIRE_RESULT::SecondaryNotified)
 	{
 		return(E_INITIALIZE_RESULT::SecondaryNotified);
@@ -705,11 +813,23 @@ CApplication::E_INITIALIZE_RESULT CApplication::Initialize(
 		this->Shutdown();
 		return(E_INITIALIZE_RESULT::Failure);
 	}
+	// 복원 창을 먼저 세운 뒤 기동 경로를 연다 - 작업 공간을 대체하지 않는다(원본 app.py:1229~1231).
+	for (const std::wstring& sPath : _Options.Paths) { m_pState->open_path(sPath); }
 	this->StartAutomaticMaintenance();
 	m_pState->Instance.SetNewWindowHandler([State = m_pState.get()]() {
 		if (State->bAcceptNewWindows.load() && ::IsWindow(State->hDispatcher))
 		{
 			::PostMessageW(State->hDispatcher, WM_NOTEEX_NEW_WINDOW, 0, 0);
+		}
+	});
+	m_pState->Instance.SetOpenFileHandler([State = m_pState.get()](std::wstring _sPath) {
+		if (!State->bAcceptNewWindows.load() || !::IsWindow(State->hDispatcher)) { return; }
+		auto pPath = std::make_unique<std::wstring>(std::move(_sPath));
+		if (::PostMessageW(State->hDispatcher, WM_NOTEEX_OPEN_FILE, 0,
+			reinterpret_cast<LPARAM>(pPath.get())) != FALSE)
+		{
+			// 디스패처가 소유권을 회수한다.
+			static_cast<void>(pPath.release());
 		}
 	});
 	return(E_INITIALIZE_RESULT::Primary);
@@ -726,6 +846,7 @@ void CApplication::Shutdown()
 	m_pState->stop_maintenance_timer();
 	m_pState->bAcceptNewWindows.store(false);
 	m_pState->Instance.SetNewWindowHandler({});
+	m_pState->Instance.SetOpenFileHandler({});
 	for (auto& [Token, Window] : m_pState->Windows)
 	{
 		Window->Cleanup();
