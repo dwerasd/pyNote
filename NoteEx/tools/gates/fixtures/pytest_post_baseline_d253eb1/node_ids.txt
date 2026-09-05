@@ -1,0 +1,141 @@
+tests/integration/test_file_binding_repository.py::test_a_free_path_resolves_without_touching_any_row
+tests/integration/test_file_binding_repository.py::test_a_path_held_by_an_active_card_reports_the_holder_and_keeps_the_row
+tests/integration/test_file_binding_repository.py::test_binding_rows_block_a_raw_card_delete
+tests/integration/test_file_binding_repository.py::test_binding_table_foreign_key_uses_delete_restrict
+tests/integration/test_file_binding_repository.py::test_capture_source_enum_is_untouched_by_the_binding_feature
+tests/integration/test_file_binding_repository.py::test_card_purge_removes_the_binding_row
+tests/integration/test_file_binding_repository.py::test_delete_file_binding_removes_only_that_row
+tests/integration/test_file_binding_repository.py::test_document_purge_removes_every_binding_row_of_that_document
+tests/integration/test_file_binding_repository.py::test_migration_is_idempotent_when_the_schema_version_is_rewound
+tests/integration/test_file_binding_repository.py::test_path_key_is_unique_across_cards
+tests/integration/test_file_binding_repository.py::test_rebinding_a_path_held_by_a_trashed_card_succeeds_with_one_active_row
+tests/integration/test_file_binding_repository.py::test_schema_version_ten_creates_the_binding_table
+tests/integration/test_file_binding_repository.py::test_trashed_cards_keep_the_binding_but_leave_the_active_lookup
+tests/integration/test_file_binding_repository.py::test_upsert_reads_back_every_column_and_replaces_on_conflict
+tests/integration/test_file_sync.py::test_a_binding_that_never_synced_writes_without_asking
+tests/integration/test_file_sync.py::test_a_card_without_a_binding_never_touches_a_file
+tests/integration/test_file_sync.py::test_a_failed_replace_reports_failure_and_leaves_no_temporary_file
+tests/integration/test_file_sync.py::test_a_read_only_target_fails_with_the_windows_error_code
+tests/integration/test_file_sync.py::test_an_external_change_that_matches_the_card_is_a_noop
+tests/integration/test_file_sync.py::test_an_interactive_save_also_refuses_before_the_user_answers
+tests/integration/test_file_sync.py::test_an_unrepresentable_character_fails_instead_of_being_replaced
+tests/integration/test_file_sync.py::test_cancelling_leaves_the_next_save_asking_again
+tests/integration/test_file_sync.py::test_database_stays_consistent_after_syncing
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-False]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-True]
+tests/integration/test_file_sync.py::test_edited_save_rewrites_the_file_in_the_original_format[{\n  "\uc774\ub984": "\uac12",\n  "\ubaa9\ub85d": [1, 2, 3]\n}-utf-8-False-crlf-True]
+tests/integration/test_file_sync.py::test_external_change_is_not_overwritten_without_a_decision
+tests/integration/test_file_sync.py::test_force_overwrites_the_external_change
+tests/integration/test_file_sync.py::test_missing_file_is_recreated
+tests/integration/test_file_sync.py::test_rejected_files_are_never_read_into_a_binding_and_stay_untouched[\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f\xa0\xa1\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac\xad\xae\xaf\xb0\xb1\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xbb\xbc\xbd\xbe\xbf\xc0\xc1\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xcb\xcc\xcd\xce\xcf\xd0\xd1\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xdb\xdc\xdd\xde\xdf\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff]
+tests/integration/test_file_sync.py::test_rejected_files_are_never_read_into_a_binding_and_stay_untouched[\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR]
+tests/integration/test_file_sync.py::test_rejected_files_are_never_read_into_a_binding_and_stay_untouched[\xec\x95\x9e\xc2\xa0\xeb\x92\xa4]
+tests/integration/test_file_sync.py::test_rejected_files_are_never_read_into_a_binding_and_stay_untouched[\xec\x95\x9e\xe2\x80\xa8\xeb\x92\xa4]
+tests/integration/test_file_sync.py::test_render_and_sync_agree_on_the_bytes_written
+tests/integration/test_file_sync.py::test_stat_failure_after_replace_is_sealed_and_leaves_no_fingerprint
+tests/integration/test_file_sync.py::test_the_interactive_flag_changes_the_recorded_message
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-False]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-True]
+tests/integration/test_file_sync.py::test_unedited_save_leaves_the_file_byte_identical[{\n  "\uc774\ub984": "\uac12",\n  "\ubaa9\ub85d": [1, 2, 3]\n}-utf-8-False-crlf-True]
+tests/ui/test_file_open_launch.py::test_already_bound_path_reuses_the_owning_window
+tests/ui/test_file_open_launch.py::test_bound_path_routes_to_the_owning_window_across_windows
+tests/ui/test_file_open_launch.py::test_directory_argument_is_reported_without_creating_a_window
+tests/ui/test_file_open_launch.py::test_first_run_opens_each_path_in_a_new_window_and_activates_the_last
+tests/ui/test_file_open_launch.py::test_launch_arguments_collect_positional_paths
+tests/ui/test_file_open_launch.py::test_missing_path_reports_an_error_and_the_app_keeps_running
+tests/ui/test_file_open_launch.py::test_notify_existing_keeps_its_single_argument_signature
+tests/ui/test_file_open_launch.py::test_rejected_file_argument_reclaims_the_window_it_created
+tests/ui/test_file_open_launch.py::test_relative_path_is_resolved_against_the_caller_cwd_before_sending
+tests/ui/test_file_open_launch.py::test_second_instance_delivers_paths_to_the_running_server
+tests/ui/test_file_open_launch.py::test_second_instance_sends_open_file_lines_instead_of_new_window
+tests/ui/test_file_open_launch.py::test_undecodable_open_file_command_is_ignored
+tests/unit/test_file_binding_service.py::test_ansi_fixture_is_not_valid_utf8_so_the_fallback_is_exercised
+tests/unit/test_file_binding_service.py::test_card_body_normalizes_every_line_ending_to_lf
+tests/unit/test_file_binding_service.py::test_control_characters_block_binding[0]
+tests/unit/test_file_binding_service.py::test_control_characters_block_binding[127]
+tests/unit/test_file_binding_service.py::test_control_characters_block_binding[1]
+tests/unit/test_file_binding_service.py::test_control_characters_block_binding[31]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-crlf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-mbcs-False-lf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-crlf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-be-True-lf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-crlf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-16-le-True-lf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-crlf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-False-lf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-crlf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-False]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[\uccab \uc904 \ud55c\uae00\n\ub450 \ubc88\uc9f8 \uc904 ASCII\n\uc138 \ubc88\uc9f8-utf-8-True-lf-True]
+tests/unit/test_file_binding_service.py::test_detect_then_render_reproduces_original_bytes[{\n  "\uc774\ub984": "\uac12",\n  "\ubaa9\ub85d": [1, 2, 3]\n}-utf-8-False-crlf-True]
+tests/unit/test_file_binding_service.py::test_empty_file_detects_as_empty_text_without_trailing_newline
+tests/unit/test_file_binding_service.py::test_lone_high_bytes_fail_strict_decoding
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\nb-lf]
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\nb\r\nc-lf]
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\r\nb-crlf]
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\r\nb\nc-crlf]
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\rb-cr]
+tests/unit/test_file_binding_service.py::test_newline_detection_takes_the_first_line_ending[a\rb\nc-cr]
+tests/unit/test_file_binding_service.py::test_path_key_ignores_case_on_windows
+tests/unit/test_file_binding_service.py::test_pending_binding_derives_its_path_key_from_the_path
+tests/unit/test_file_binding_service.py::test_png_header_passes_ansi_decoding_but_the_control_gate_rejects_it
+tests/unit/test_file_binding_service.py::test_read_file_hash_matches_the_bytes_on_disk
+tests/unit/test_file_binding_service.py::test_render_does_not_replace_characters_the_encoding_cannot_represent
+tests/unit/test_file_binding_service.py::test_render_rejects_a_bom_on_an_encoding_that_has_none
+tests/unit/test_file_binding_service.py::test_render_uses_the_binding_newline_for_every_line
+tests/unit/test_file_binding_service.py::test_resolve_path_returns_an_absolute_resolved_path_and_its_normcase_key
+tests/unit/test_file_binding_service.py::test_roundtrip_hazard_characters_block_binding[160]
+tests/unit/test_file_binding_service.py::test_roundtrip_hazard_characters_block_binding[64976]
+tests/unit/test_file_binding_service.py::test_roundtrip_hazard_characters_block_binding[64977]
+tests/unit/test_file_binding_service.py::test_roundtrip_hazard_characters_block_binding[8232]
+tests/unit/test_file_binding_service.py::test_roundtrip_hazard_characters_block_binding[8233]
+tests/unit/test_file_binding_service.py::test_utf16_endianness_comes_from_the_bom_not_from_the_platform
+tests/unit/test_file_binding_service.py::test_whitespace_control_characters_stay_allowed[\n]
+tests/unit/test_file_binding_service.py::test_whitespace_control_characters_stay_allowed[\r]
+tests/unit/test_file_binding_service.py::test_whitespace_control_characters_stay_allowed[\t]
+tests/unit/test_file_binding_service.py::test_whitespace_control_characters_stay_allowed[\x0b]
+tests/unit/test_file_binding_service.py::test_whitespace_control_characters_stay_allowed[\x0c]

@@ -769,6 +769,60 @@ python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_212
 돌연변이 거부를 **양방향으로** 지킨다 — 형을 추가하면 그 두 방향을 함께 늘린다. 이름형은 W2 행이 쓰고
 있으므로 제거하지 않는다.
 
+## 파일 결속 부록 (2026-09-05)
+
+게이트 규약 변경이다. 프로젝트 CLAUDE.md 가 요구하는 사용자 확인은 **텔레그램 ask 응답 2026-09-05 07:57
+"검사기 개정해 부록 행 추가(권장)"** 이며 이 절이 그 인용을 소유한다.
+
+**무엇을 강제하나.** 추적표에 `<!-- CAPABILITY-APPENDIX-BEGIN -->` … `<!-- CAPABILITY-APPENDIX-END -->`
+블록이 생겼다. 정본은 `docs/20260905_1516_opus5_xhigh_파일결속_capability부록_errata-01.md` 의
+`[FILE BINDING]` 절 **6열 표**(행 ID·정본 절·원문 행 내용·구현 owner·안정 probe ID·gate 명령)이고, 그
+파일의 SHA-256 이 검사기 상수 `APPENDIX_SOURCE_SHA256` 으로 동결돼 있다. 추적표 블록은 그 6열에서
+파생한 **8열**이다 — `구현 산출물` 은 owner 에서, `완료 증거` 는 추적표가 채운다. 부록 정본이 6열인
+이유는 파생 2열을 정본에 넣으면 같은 사실을 두 곳이 소유하기 때문이다.
+
+검사기는 부록에 본표와 **같은 규칙**을 건다(원순서·내용 일치·owner `W[0-7]` 하나·owner 산출물·유일
+probe ID·gate 허용 3형·필수 열 비공란·완료 증거 PASS 행의 선택자 실재). 여기에 부록 전용 규칙 하나가
+더 붙는다 — **부록 ID 가 본표 274행 ID 와 겹치면 실패**(`APPENDIX_ID_COLLISION`)다.
+
+**기존 274행 판정은 이 개정으로 바뀌지 않는다.** 부록은 별도 정본·별도 블록·별도 함수(`validate_appendix`)
+이며 본표 경로(`source_rows`·`validate_rows`·`validate_uncertain`)는 한 줄도 손대지 않았다. 대신 **부록
+블록은 이제 필수**다 — 블록이 없는 문서는 `APPENDIX_BLOCK_MISSING` 으로 rc=1 이다.
+
+W6·W7 행은 예약이다. 소유 wave 가 아직 없어 `[WTL-CAP-FB-###]` 태그를 단 케이스가 없으므로 완료 증거를
+`미실시 — 소유 wave 구현 전` 으로 둔다. `--tests-exe` 교차 검증은 PASS 행만 보므로 이 행들은 대상이 아니다.
+
+### 실행
+
+```powershell
+python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md" --matrix "docs/20260819_2026_Sol_max_WTL포팅_capability추적표-01.md" --appendix-source "docs/20260905_1516_opus5_xhigh_파일결속_capability부록_errata-01.md" --tests-exe NoteEx\x64\ReleaseMD\NoteExTests.exe
+```
+
+`--appendix-source` 는 생략할 수 있고 기본값은 위 경로다(검사기 상수 `APPENDIX_SOURCE_RELATIVE`).
+성공하면 본표 요약 뒤에 `부록 통과: appendix SHA-256=…, 파일 결속 21행 …` 한 줄이 더 나온다.
+
+### 실패는 무슨 뜻인가
+
+- `APPENDIX_SOURCE_MISSING` / `APPENDIX_SOURCE_SHA` — 부록 정본이 없거나 고쳐졌다. 정본을 고쳤으면
+  `APPENDIX_SOURCE_SHA256` 도 함께 고쳐야 한다. **상수만 맞추고 넘어가는 것은 동결의 무력화**이므로
+  행 변경의 근거를 지시서·판정문에 남긴 뒤에만 한다.
+- `APPENDIX_BLOCK_MISSING` — 추적표에 부록 블록이 없다. 개정 이후 이것은 정상 상태가 아니다.
+- `APPENDIX_MISSING` / `APPENDIX_EXTRA` / `APPENDIX_ORDER` / `APPENDIX_CHANGED` — 블록이 정본에서 벗어났다.
+  고칠 곳은 블록이지 정본이 아니다.
+- `APPENDIX_ID_COLLISION` — 부록 행 ID 가 본표 ID 와 같다. 부록 ID 는 `CAP-FB-###` 대역을 쓴다.
+- `GATE_SELECTOR_EMPTY` — 완료 증거는 PASS 인데 그 태그로 도는 케이스가 없다. 실행본이 낡았거나 태그가
+  케이스에 붙지 않았다.
+
+### 자기시험
+
+`--self-test` 는 기존 16축(본표·UNCERTAIN)을 그대로 지키고 부록 축 15종을 더 건다 — 정본 부재, 정본 SHA
+불일치, 행 누락, 무단 추가, 원순서 변경, 내용 변조, 본표와 겹치는 ID 중복, owner 위반(정본과 다름)·owner
+공란·owner 형식 위반, 산출물 불일치, probe ID 불일치, probe ID 중복, gate 명령 형식 위반, 필수 열 공란.
+여기에 블록 부재 축이 하나 더 붙는다(지시서 §1-4 의 13종에 owner 갈래 2종을 더한 것 — 본표 자기시험이
+owner 세 갈래를 각각 지키는 것과 맞춘다).
+정본 부재·SHA 불일치 두 축만 실파일이 필요해 임시 디렉터리에 그때 만든다 — 저장소에 known-bad 정본을
+남기면 SHA 동결 대상이 하나 더 늘어나기 때문이다. 부록 규칙을 늘리면 known-bad 도 함께 늘린다.
+
 ---
 
 # 다중 창 수명주기 스모크 — `ActualPageChildWindows` 카드 목록 클래스명 기대값 개정 (W4 S1, 2026-08-22)
@@ -788,3 +842,77 @@ python NoteEx/tools/gates/check_capability_matrix.py --source "docs/20260819_212
 - 실패는 무슨 뜻인가: `ActualPageChildWindows=False` 이고 다른 술어가 True 면 카드 목록 컨트롤의 클래스
   등록(`DECLARE_WND_CLASS_EX(L"NoteExCardList", …)`)이나 페이지의 컨트롤 생성(ID 2101·가시)이 깨진 것이다.
   메시지 프로브 3건만 False 면 LB 호환 메시지 구현의 회귀다.
+
+---
+
+# 시험 이식 대장 게이트 (check_test_port_register.py)
+
+`check_test_port_register.py` 는 시험 이식 대장의 **행 집합을 동결 manifest 에 묶는다.** baseline 블록은
+`fixtures/pytest_baseline_6ccb3c7/node_ids.txt` 의 630행을 원수집 순서 그대로 요구하고, 처분(`A직역`·
+`B강등`·`C재작성`)과 owner wave 는 설계서 §9·§11 오라클과 exact 일치해야 한다. `implemented` 행의
+native test ID 는 **소스와 `--list-tests` 양쪽에** 실재해야 하고, `planned` 행은 `PLAN-W#-####` 예약
+형식에 owner 가 맞아야 하며 예약 ID 는 유일하다. post-baseline 5행은 별도 블록·별도 provenance 다.
+
+## 파일 결속 부록 (2026-09-05)
+
+게이트 규약 변경이다. 사용자 확인은 **텔레그램 ask 응답 2026-09-05 07:57 "검사기 개정해 부록 행
+추가(권장)"** 이며 capability 검사기 절의 같은 인용과 한 건이다.
+
+**무엇을 강제하나.** 대장에 `<!-- T4A_POST_BASELINE_FS_BEGIN -->` … `<!-- T4A_POST_BASELINE_FS_END -->`
+블록이 생겼다. 열은 baseline 과 **같은 6열**(baseline node ID·disposition·native test ID·owner wave·
+status·provenance)이고 provenance 는 `post-baseline-reference:6ccb3c7..d253eb1` 고정이다. 행 집합의 정본은
+두 번째 동결 manifest `fixtures/pytest_post_baseline_d253eb1/node_ids.txt` 이며, 141행·`LC_ALL=C` 정렬·
+SHA-256 이 검사기 상수 `POST_BASELINE_FS_SHA256` 으로 동결돼 있다. 검사기가 대조하는 대상은 **그 파일이지
+지시서의 집계표가 아니다** — 파라미터화된 node ID 는 문서의 열 폭 안에 verbatim 으로 실을 수 없다.
+
+처분 오라클은 지시서 §9-2 다. unit·integration 129건은 `A직역` 이고, ui 12건 중 **실 UI 결선 3건만**
+`C재작성`, 나머지 9건은 core 단언이라 `B강등` 이다(`FS_C_REWRITE_FUNCTIONS`). owner 는 층 규칙이다 —
+저장 W1, 도메인·애플리케이션 코어 W2, 셸·수명주기 W3.
+
+**예약 ID 는 두 블록이 한 집합을 공유한다.** 종전 `planned_ids` 는 baseline 루프의 지역 집합이라 블록을
+가로지르는 충돌을 잡지 못했다. 개정은 그 집합을 호출부가 만들어 두 블록에 넘긴다 — 인자를 주지 않으면
+종전대로 지역 집합이므로 **baseline 단독 판정은 바뀌지 않고 집합의 수명만 늘어난다.** FS 예약은
+`PLAN-W#-9###` 대역을 써서 baseline 예약(`PLAN-W#-0###`)과 겹치지 않는다.
+
+**기존 630+5행 판정은 이 개정으로 바뀌지 않는다.** FS 블록은 별도 manifest·별도 블록·별도 함수
+(`check_fs_rows`)이며 판독 경로도 `read_fs_register` 로 갈라 두었다. 대신 **FS 블록은 이제 필수**다 —
+블록이 없는 대장은 `FS 블록이 없다` 로 rc=1 이다.
+
+### 실행
+
+```powershell
+python NoteEx/tools/gates/check_test_port_register.py --manifest NoteEx/tools/gates/fixtures/pytest_baseline_6ccb3c7/node_ids.txt --register "docs/20260819_2026_Sol_max_WTL포팅_시험이식대장-01.md" --native-root NoteEx/tests --native-exe NoteEx\x64\ReleaseMD\NoteExTests.exe
+```
+
+`--fs-manifest` 로 FS manifest 경로를 바꿀 수 있고 기본값은 위 fixture 다(상수
+`POST_BASELINE_FS_MANIFEST_RELATIVE`). 성공하면 baseline 요약 뒤에
+`fs: 141 rows, implemented 132, planned 9` 한 줄이 더 나온다 — **FS 수치는 baseline 수치와 합산하지
+않는다.** 서로 다른 수집 표면이다.
+
+### 실패는 무슨 뜻인가
+
+- `FS manifest SHA-256 is …` (rc=2) — 동결 manifest 가 고쳐졌다. 파이썬 시험이 늘거나 이름이 바뀌면
+  manifest 를 다시 뜨고 상수도 함께 고친다. 그때 대장 블록의 행도 함께 다시 낸다.
+- `FS 블록이 없다` — 대장에 FS 블록의 시작 marker 가 없다. 개정 이후 정상 상태가 아니다. 블록은 있는데
+  표 형식이 깨졌으면(끝 파이프 누락 등) baseline 경로와 같이 `malformed register row: …` 로 rc=2 가 나오고
+  고칠 행이 그 문구에 실린다.
+- `누락 FS node ID` / `FS 블록 행 수 위반` / `FS 원순서 위반` — 블록이 manifest 에서 벗어났다.
+- `FS §9-2 semantic 처분 불일치` / `FS 층 규칙 semantic owner 불일치` — 오라클과 어긋난다. 판정을 바꾸려면
+  오라클(`FS_C_REWRITE_FUNCTIONS`·`FS_OWNER_BY_FILE`)을 근거와 함께 고친다. **행만 고치는 것은 위반이다.**
+- `존재하지 않는 FS 신규 ID` — `implemented` 로 적었는데 그 이름의 케이스가 소스나 실행본에 없다.
+  실행본이 낡았을 수도 있다.
+- `planned 예약 ID 중복` — 두 블록을 가로지르는 예약 충돌이다. FS 예약은 `PLAN-W#-9###` 를 쓴다.
+
+### native test ID 열을 채우는 규칙
+
+**이름이 아니라 계약이 같은 케이스를 가리킨다.** 네이티브 케이스 이름은 한국어이고 파이썬 함수 이름과
+대응 규칙이 없다. 한 네이티브 케이스가 파라미터화된 여러 node 를 닫을 수 있으므로 `implemented` 행의
+native ID 는 **중복을 허용**한다(예약 ID 만 유일해야 한다). 계약을 닫는 케이스가 없으면 `planned` 다 —
+있는 케이스에 억지로 붙이는 것이 이 열의 유일한 오용 방식이다.
+
+### 자기시험
+
+`--self-test` 는 기존 baseline 11축을 그대로 지키고 FS 축 9종을 더 건다 — manifest SHA 불일치, 행 누락,
+행 초과, 원순서 위반, 미실재 native ID, 처분 값 위반, status 값 위반, owner 위반, 블록을 가로지르는 예약
+ID 중복. 여기에 블록 부재 축이 하나 더 붙는다. manifest SHA 축만 실파일이 필요해 임시 사본으로 만든다.
+출력 끝줄은 `self-test complete: 11 baseline + 9 FS independent failure conditions rejected` 다.

@@ -14,6 +14,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -38,6 +39,16 @@ SMOKE_GATE = (
     "-Executable x64\\ReleaseMD\\NoteEx.exe"
 )
 
+# 파일 결속 부록(2026-09-05). 본표 274행 판정은 위 상수·아래 함수와 무관하게 그대로 돌고,
+# 부록은 같은 규칙을 별도 정본·별도 블록에 덧대기만 한다.
+APPENDIX_SOURCE_SHA256 = "6cba388acd9ada21a2fcc84dfd5f117d1fa5da4e64a92c9521ebe2b4b572a198"
+APPENDIX_SOURCE_RELATIVE = "docs/20260905_1516_opus5_xhigh_파일결속_capability부록_errata-01.md"
+APPENDIX_SECTION = "[FILE BINDING]"
+APPENDIX_BEGIN = "<!-- CAPABILITY-APPENDIX-BEGIN -->"
+APPENDIX_END = "<!-- CAPABILITY-APPENDIX-END -->"
+APPENDIX_SOURCE_FIELDS = 6
+APPENDIX_HEADER_PREFIX = "| 행 ID |"
+
 
 @dataclass(frozen=True)
 class SourceRow:
@@ -56,6 +67,18 @@ class MatrixRow:
     probe_id: str
     gate: str
     evidence: str
+
+
+@dataclass(frozen=True)
+class AppendixSourceRow:
+    """부록 정본의 6열 원문 행 — 추적표 8열에서 파생 2열(산출물·완료 증거)을 뺀 형태다."""
+
+    row_id: str
+    section: str
+    text: str
+    owner: str
+    probe_id: str
+    gate: str
 
 
 @dataclass(frozen=True)
@@ -565,6 +588,158 @@ def validate_selectors(matrix: list[MatrixRow], tags: set[str], names: set[str])
     return problems
 
 
+def appendix_source_rows(source_text: str) -> list[AppendixSourceRow]:
+    """부록 정본의 `[FILE BINDING]` 절 6열 표를 원문 순서 그대로 읽는다."""
+    lines = source_text.splitlines()
+    try:
+        start = lines.index(APPENDIX_SECTION) + 1
+    except ValueError as exc:
+        raise MatrixError(f"APPENDIX_SOURCE_SECTION: 정본 절이 없다: {APPENDIX_SECTION}") from exc
+    end = next(
+        (
+            index
+            for index in range(start, len(lines))
+            if lines[index].startswith("[") and lines[index].endswith("]")
+        ),
+        len(lines),
+    )
+    rows: list[AppendixSourceRow] = []
+    for line in lines[start:end]:
+        if not line.startswith("|"):
+            continue
+        if re.match(r"^\|[- ]+\|", line) or line.startswith(APPENDIX_HEADER_PREFIX):
+            continue
+        values = parse_table_row(line, APPENDIX_SOURCE_FIELDS, f"appendix source {len(rows) + 1}")
+        rows.append(AppendixSourceRow(*values))
+    if not rows:
+        raise MatrixError(f"APPENDIX_SOURCE_COUNT: {APPENDIX_SECTION} 절에 행이 없다")
+    return rows
+
+
+def load_appendix_source(path: Path) -> list[AppendixSourceRow]:
+    """부록 정본을 SHA-256 동결과 함께 읽는다 — 부재·변조는 여기서 멈춘다."""
+    try:
+        text, digest = read_exact_text(path)
+    except OSError as exc:
+        raise MatrixError(
+            f"APPENDIX_SOURCE_MISSING: 부록 정본을 읽을 수 없다: {path}: {exc}"
+        ) from exc
+    if digest != APPENDIX_SOURCE_SHA256:
+        raise MatrixError(f"APPENDIX_SOURCE_SHA: {digest}, 기대 {APPENDIX_SOURCE_SHA256}")
+    return appendix_source_rows(text)
+
+
+def default_appendix(rows: Iterable[AppendixSourceRow]) -> list[MatrixRow]:
+    """정본 6열에서 추적표 8열을 파생한다 — 산출물은 owner에서, 완료 증거는 예약값이다."""
+    return [
+        MatrixRow(
+            row.row_id,
+            row.section,
+            row.text,
+            row.owner,
+            ARTIFACTS.get(row.owner, ""),
+            row.probe_id,
+            row.gate,
+            "미실시 — 소유 wave 구현 전",
+        )
+        for row in rows
+    ]
+
+
+def parse_appendix(matrix_text: str) -> list[MatrixRow] | None:
+    """부록 블록을 8열로 읽는다. 블록 자체가 없으면 None — 호출부가 위반으로 올린다."""
+    try:
+        lines = marked_lines(matrix_text, APPENDIX_BEGIN, APPENDIX_END)
+    except MatrixError:
+        return None
+    data = [line for line in lines if line.startswith("|")]
+    if len(data) < 2:
+        raise MatrixError("SCHEMA: capability 부록 표 header가 없다")
+    result: list[MatrixRow] = []
+    for index, line in enumerate(data[2:], 1):
+        values = parse_table_row(line, 8, f"capability appendix {index}")
+        result.append(MatrixRow(*values))
+    return result
+
+
+def validate_appendix(
+    expected: list[AppendixSourceRow],
+    actual: list[MatrixRow] | None,
+    main_rows: list[MatrixRow],
+) -> list[str]:
+    """부록 블록에 본표와 같은 규칙을 건다 — 정본은 6열 부록 errata 다.
+
+    본표 판정은 이 함수를 거치지 않는다. 부록이 아예 없는 문서는 개정 이후 위반이다.
+    """
+    if actual is None:
+        return [f"APPENDIX_BLOCK_MISSING: 부록 블록이 없다: {APPENDIX_BEGIN}"]
+
+    problems: list[str] = []
+    expected_by_id = {row.row_id: row for row in expected}
+    ids = [row.row_id for row in actual]
+    duplicates = sorted({row_id for row_id in ids if ids.count(row_id) > 1})
+    for row_id in duplicates:
+        problems.append(f"APPENDIX_DUPLICATE: 부록 ID가 중복이다: {row_id}")
+    main_ids = {row.row_id for row in main_rows}
+    for row_id in sorted(set(ids) & main_ids):
+        problems.append(f"APPENDIX_ID_COLLISION: 본표와 겹치는 ID다: {row_id}")
+    actual_ids = set(ids)
+    for row in expected:
+        if row.row_id not in actual_ids:
+            problems.append(f"APPENDIX_MISSING: 부록 정본 행이 없다: {row.row_id}")
+    for row_id in sorted(actual_ids - set(expected_by_id)):
+        problems.append(f"APPENDIX_EXTRA: 부록 정본에 없는 행이다: {row_id}")
+    if not duplicates and actual_ids == set(expected_by_id):
+        if ids != [row.row_id for row in expected]:
+            problems.append("APPENDIX_ORDER: 부록 정본 원순서가 바뀌었다")
+
+    main_probes = {row.probe_id for row in main_rows if row.probe_id}
+    probe_ids = [row.probe_id for row in actual if row.probe_id]
+    repeated = {probe_id for probe_id in probe_ids if probe_ids.count(probe_id) > 1}
+    duplicate_probes = sorted(repeated | (set(probe_ids) & main_probes))
+    for probe_id in duplicate_probes:
+        problems.append(f"APPENDIX_PROBE_DUPLICATE: 부록 probe ID가 중복이다: {probe_id}")
+
+    seen: set[str] = set()
+    for row in actual:
+        if row.row_id in seen or row.row_id not in expected_by_id:
+            continue
+        seen.add(row.row_id)
+        source = expected_by_id[row.row_id]
+        if row.section != source.section or row.text != source.text:
+            problems.append(f"APPENDIX_CHANGED: 부록 정본 의미/내용이 바뀌었다: {row.row_id}")
+        for field_name, value in (
+            ("artifact", row.artifact),
+            ("probe_id", row.probe_id),
+            ("gate", row.gate),
+            ("evidence", row.evidence),
+        ):
+            if not value:
+                problems.append(
+                    f"APPENDIX_REQUIRED_BLANK: 부록 필수 열이 비었다: {row.row_id}.{field_name}"
+                )
+        if not row.owner:
+            problems.append(f"APPENDIX_OWNER_UNASSIGNED: 부록 owner가 비었다: {row.row_id}")
+        elif not VALID_OWNER.fullmatch(row.owner):
+            problems.append(
+                f"APPENDIX_OWNER_INVALID: owner는 W0~W7 하나여야 한다: {row.row_id}={row.owner}"
+            )
+        elif row.owner != source.owner:
+            problems.append(
+                f"APPENDIX_OWNER_MISMATCH: 부록 정본 owner가 다르다: {row.row_id}="
+                f"{row.owner}, 기대 {source.owner}"
+            )
+        expected_artifact = ARTIFACTS.get(source.owner, "")
+        if row.artifact and row.artifact != expected_artifact:
+            problems.append(f"APPENDIX_ARTIFACT_MISMATCH: owner 산출물이 다르다: {row.row_id}")
+        expected_probe = row.row_id.replace("CAP-", "WTL-CAP-")
+        if row.probe_id and (row.probe_id != expected_probe or row.probe_id != source.probe_id):
+            problems.append(f"APPENDIX_PROBE_MISMATCH: 안정 probe/시험 ID가 다르다: {row.row_id}")
+        if row.gate and (gate_form(row.gate, expected_probe) is None or row.gate != source.gate):
+            problems.append(f"APPENDIX_GATE_MISMATCH: gate 명령이 다르다: {row.row_id}")
+    return problems
+
+
 def validate_uncertain(actual: list[UncertainLink]) -> list[str]:
     problems: list[str] = []
     expected_ids = [row.link_id for row in UNCERTAIN_LINKS]
@@ -666,7 +841,129 @@ def _replace_matrix_row(rows: list[MatrixRow], index: int, **changes: str) -> li
     return changed
 
 
-def run_self_test(source: Path) -> int:
+def _run_appendix_self_test(appendix_source: Path, good_main: list[MatrixRow]) -> bool:
+    """부록 축 15종(지시서 13종 + owner 공란·형식 위반)을 거는 자기시험 — 반환값은 실패 여부다.
+
+    정본 부재·SHA 불일치 두 축만 실파일이 필요하므로 임시 디렉터리에 그때 만든다.
+    저장소에 known-bad 정본을 남기면 SHA 동결 대상이 하나 더 늘어난다.
+    """
+    failed = False
+    try:
+        source_rows = load_appendix_source(appendix_source)
+    except MatrixError as exc:
+        print(f"FAIL  부록 정본 적재: {exc}")
+        return True
+    good = default_appendix(source_rows)
+    problems = validate_appendix(source_rows, good, good_main)
+    if problems:
+        print(f"FAIL  부록 정상 표본 거부; problems={problems}")
+        return True
+    print(f"PASS  부록 정상 표본 수용({len(good)}행)")
+
+    with tempfile.TemporaryDirectory() as directory:
+        missing_path = Path(directory) / "부재.md"
+        tampered_path = Path(directory) / "변조.md"
+        tampered_path.write_bytes(appendix_source.read_bytes() + b"\n")
+        for name, expected_reason, path in (
+            ("부록 정본 부재", "APPENDIX_SOURCE_MISSING:", missing_path),
+            ("부록 정본 SHA 불일치", "APPENDIX_SOURCE_SHA:", tampered_path),
+        ):
+            try:
+                load_appendix_source(path)
+            except MatrixError as exc:
+                if str(exc).startswith(expected_reason):
+                    print(f"PASS  seeded known-bad 거부: {name} -> {exc}")
+                    continue
+                print(f"FAIL  seeded known-bad 판별: {name}; problem={exc}")
+            else:
+                print(f"FAIL  seeded known-bad 미탐: {name}")
+            failed = True
+
+    mutations: list[tuple[str, str, Callable[[], list[MatrixRow] | None]]] = [
+        ("부록 행 누락", "APPENDIX_MISSING:", lambda: good[1:]),
+        (
+            "부록 무단 추가",
+            "APPENDIX_EXTRA:",
+            lambda: [*good, replace(good[-1], row_id="CAP-FB-999")],
+        ),
+        ("부록 원순서 변경", "APPENDIX_ORDER:", lambda: [good[1], good[0], *good[2:]]),
+        (
+            "부록 내용 변조",
+            "APPENDIX_CHANGED:",
+            lambda: _replace_matrix_row(good, 0, text=good[0].text + " altered"),
+        ),
+        (
+            "본표와 겹치는 ID 중복",
+            "APPENDIX_ID_COLLISION:",
+            lambda: _replace_matrix_row(good, 0, row_id=good_main[0].row_id),
+        ),
+        (
+            "부록 owner 위반",
+            "APPENDIX_OWNER_MISMATCH:",
+            lambda: _replace_matrix_row(good, 0, owner="W1"),
+        ),
+        (
+            "부록 owner 공란",
+            "APPENDIX_OWNER_UNASSIGNED:",
+            lambda: _replace_matrix_row(good, 0, owner=""),
+        ),
+        (
+            "부록 owner 형식 위반",
+            "APPENDIX_OWNER_INVALID:",
+            lambda: _replace_matrix_row(good, 0, owner="W3,W4"),
+        ),
+        (
+            "부록 산출물 불일치",
+            "APPENDIX_ARTIFACT_MISMATCH:",
+            lambda: _replace_matrix_row(good, 0, artifact="altered artifact"),
+        ),
+        (
+            "부록 probe ID 불일치",
+            "APPENDIX_PROBE_MISMATCH:",
+            lambda: _replace_matrix_row(good, 0, probe_id="WTL-CAP-FB-999"),
+        ),
+        (
+            "부록 probe ID 중복",
+            "APPENDIX_PROBE_DUPLICATE:",
+            lambda: _replace_matrix_row(good, 1, probe_id=good[0].probe_id),
+        ),
+        (
+            "부록 gate 명령 형식 위반",
+            "APPENDIX_GATE_MISMATCH:",
+            lambda: _replace_matrix_row(good, 0, gate="wrong gate"),
+        ),
+        (
+            "부록 필수 열 공란",
+            "APPENDIX_REQUIRED_BLANK:",
+            lambda: _replace_matrix_row(good, 0, evidence=""),
+        ),
+        ("부록 블록 부재", "APPENDIX_BLOCK_MISSING:", lambda: None),
+    ]
+    allowed_related_by_name = {
+        "부록 무단 추가": ("APPENDIX_PROBE_DUPLICATE:",),
+        "본표와 겹치는 ID 중복": ("APPENDIX_MISSING:", "APPENDIX_EXTRA:"),
+        "부록 owner 위반": ("APPENDIX_ARTIFACT_MISMATCH:",),
+        "부록 probe ID 중복": ("APPENDIX_PROBE_MISMATCH:",),
+    }
+    for name, expected_reason, make_bad in mutations:
+        problems = validate_appendix(source_rows, make_bad(), good_main)
+        matching = [problem for problem in problems if problem.startswith(expected_reason)]
+        allowed_related = allowed_related_by_name.get(name, ())
+        unrelated = [
+            problem
+            for problem in problems
+            if not problem.startswith(expected_reason)
+            and not any(problem.startswith(prefix) for prefix in allowed_related)
+        ]
+        if len(matching) == 1 and not unrelated:
+            print(f"PASS  seeded known-bad 거부: {name} -> {matching[0]}")
+        else:
+            failed = True
+            print(f"FAIL  seeded known-bad 판별: {name}; problems={problems}")
+    return failed
+
+
+def run_self_test(source: Path, appendix_source: Path) -> int:
     source_text, digest = read_exact_text(source)
     if digest != SOURCE_SHA256:
         print(f"FAIL  source SHA-256 불일치: {digest}")
@@ -782,6 +1079,9 @@ def run_self_test(source: Path) -> int:
         else:
             failed = True
             print(f"FAIL  seeded known-bad 판별: {name}; problems={problems}")
+
+    if _run_appendix_self_test(appendix_source, good):
+        failed = True
     return 1 if failed else 0
 
 
@@ -791,13 +1091,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--matrix", type=Path)
     parser.add_argument("--tests-exe", type=Path)
+    parser.add_argument("--appendix-source", type=Path)
     args = parser.parse_args(argv)
+
+    repo_root = Path(__file__).resolve().parents[3]
+    appendix_source = args.appendix_source or (repo_root / APPENDIX_SOURCE_RELATIVE)
 
     if args.self_test:
         if args.source or args.matrix or args.tests_exe:
             parser.error("--self-test는 --source/--matrix/--tests-exe와 함께 쓰지 않는다")
-        repo_root = Path(__file__).resolve().parents[3]
-        return run_self_test(repo_root / "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md")
+        return run_self_test(
+            repo_root / "docs/20260819_2123_Sol_max_WTL포팅_F_a01_errata-01.md",
+            appendix_source,
+        )
     if args.source is None or args.matrix is None:
         parser.error("검사에는 --source와 --matrix가 모두 필요하다")
 
@@ -810,9 +1116,14 @@ def main(argv: list[str] | None = None) -> int:
         matrix = parse_matrix(matrix_text)
         uncertain = parse_uncertain(matrix_text)
         problems = validate(expected, matrix, uncertain)
+        appendix_expected = load_appendix_source(appendix_source)
+        appendix = parse_appendix(matrix_text)
+        problems += validate_appendix(appendix_expected, appendix, matrix)
         if args.tests_exe is not None:
             tags, names = listed_selectors(args.tests_exe)
             problems += validate_selectors(matrix, tags, names)
+            if appendix is not None:
+                problems += validate_selectors(appendix, tags, names)
     except (OSError, MatrixError) as exc:
         print(f"환경/입력 오류: {exc}", file=sys.stderr)
         return 2
@@ -825,6 +1136,10 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"통과: source SHA-256={digest}, capability {len(matrix)}행 원순서·내용·owner·필수 열 일치, "
         f"uncertain {len(uncertain)}행 연결 완비"
+    )
+    print(
+        f"부록 통과: appendix SHA-256={APPENDIX_SOURCE_SHA256}, "
+        f"파일 결속 {len(appendix or [])}행 원순서·내용·owner·필수 열 일치"
     )
     if args.tests_exe is not None:
         print(f"gate 선택자 교차 검증: 완료 증거 PASS 행 전건 실재 ({args.tests_exe})")

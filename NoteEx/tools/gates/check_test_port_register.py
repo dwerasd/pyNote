@@ -9,6 +9,7 @@ import html
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -26,6 +27,32 @@ OWNERS = {f"W{number}" for number in range(1, 8)}
 PLANNED_ID = re.compile(r"PLAN-(W[1-7])-\d{4}$")
 TEST_CASE = re.compile(r'\bTEST_CASE\s*\(\s*"((?:\\.|[^"\\])*)"')
 NODE_CLAIM = re.compile(r"(?<![\w./-])(tests/[\w./-]*\.py)((?:::[A-Za-z_]\w*)+)(\[[^\]\s]*\])?")
+# 파일 결속 부록(2026-09-05). baseline 630행과 post-baseline 5행 판정은 아래 상수·함수와
+# 무관하게 그대로 돌고, FS 블록은 자기 동결 manifest 를 정본으로 삼아 덧대기만 한다.
+EXPECTED_FS_COUNT = 141
+POST_BASELINE_FS_SHA256 = "bf6b5c6cabc21e8e483bd775082460de593a38e79c266e42351d43e4988dc47a"
+POST_BASELINE_FS_PROVENANCE = "post-baseline-reference:6ccb3c7..d253eb1"
+POST_BASELINE_FS_MANIFEST_RELATIVE = "fixtures/pytest_post_baseline_d253eb1/node_ids.txt"
+FS_BEGIN = "<!-- T4A_POST_BASELINE_FS_BEGIN -->"
+FS_END = "<!-- T4A_POST_BASELINE_FS_END -->"
+# 층 규칙(설계서 §11) — 저장 W1, 도메인·애플리케이션 코어 W2, 셸·수명주기 W3.
+FS_OWNER_BY_FILE = {
+    "tests/integration/test_file_binding_repository.py": "W1",
+    "tests/integration/test_file_sync.py": "W2",
+    "tests/ui/test_file_open_launch.py": "W3",
+    "tests/unit/test_file_binding_service.py": "W2",
+}
+FS_UI_FILE = "tests/ui/test_file_open_launch.py"
+# ui 12건 중 실 UI 결선 3건만 C재작성이다 — 창 생성·활성화 순서, 창을 가로지르는 라우팅,
+# 만들었다 회수하는 창 수명이 대역 창으로는 관측되지 않는 술어다. 나머지 9건은 core 단언이라
+# B강등이며 네이티브 시험이 이미 같은 계약을 닫고 있다.
+FS_C_REWRITE_FUNCTIONS = frozenset(
+    {
+        "test_first_run_opens_each_path_in_a_new_window_and_activates_the_last",
+        "test_bound_path_routes_to_the_owning_window_across_windows",
+        "test_rejected_file_argument_reclaims_the_window_it_created",
+    }
+)
 POST_BASELINE_IDS = (
     "tests/integration/test_backup.py::test_restore_keeps_original_database_when_first_move_aside_fails",
     "tests/integration/test_backup.py::test_interrupted_move_aside_keeps_original_in_reservation",
@@ -302,6 +329,25 @@ def read_register(path: Path) -> tuple[list[BaselineRow], list[PostBaselineRow]]
     )
 
 
+def read_fs_register(path: Path) -> list[BaselineRow] | None:
+    """FS 블록만 따로 읽는다 — baseline·post 두 블록의 판독 경로는 손대지 않는다.
+
+    블록이 아예 없으면 None 이고 호출부가 위반으로 올린다(부록은 개정 이후 필수다).
+    블록은 있는데 형식이 깨진 경우는 baseline 경로와 같이 환경 오류(rc=2)로 참사유를 올린다 —
+    marker 부재로 뭉개면 고칠 곳이 한 행인데 블록을 통째로 다시 만들게 된다(A-P3 감사 2-1).
+    """
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise EnvironmentError(f"cannot read register: {error}") from error
+    if FS_BEGIN not in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        return None
+    cells = _table_lines(text, FS_BEGIN, FS_END)
+    if any(len(row) != 6 for row in cells):
+        raise EnvironmentError("FS register must have exactly 6 columns")
+    return [BaselineRow(*row) for row in cells]
+
+
 def read_manifest(path: Path) -> list[str]:
     try:
         raw = path.read_bytes()
@@ -321,6 +367,131 @@ def read_manifest(path: Path) -> list[str]:
     if len(set(nodes)) != len(nodes):
         raise EnvironmentError("manifest itself contains duplicate node IDs")
     return nodes
+
+
+def read_fs_manifest(path: Path) -> list[str]:
+    """파일 결속 동결 manifest 를 읽는다 — 141행, LC_ALL=C 정렬, SHA-256 동결."""
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise EnvironmentError(f"cannot read FS manifest: {error}") from error
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != POST_BASELINE_FS_SHA256:
+        raise EnvironmentError(
+            f"FS manifest SHA-256 is {digest}, expected {POST_BASELINE_FS_SHA256}"
+        )
+    try:
+        nodes = raw.decode("utf-8-sig").splitlines()
+    except UnicodeDecodeError as error:
+        raise EnvironmentError(f"FS manifest is not valid UTF-8: {error}") from error
+    if len(nodes) != EXPECTED_FS_COUNT:
+        raise EnvironmentError(f"FS manifest count is {len(nodes)}, expected {EXPECTED_FS_COUNT}")
+    if len(set(nodes)) != len(nodes):
+        raise EnvironmentError("FS manifest itself contains duplicate node IDs")
+    if nodes != sorted(nodes, key=str.encode):
+        raise EnvironmentError("FS manifest is not LC_ALL=C sorted")
+    return nodes
+
+
+def fs_expected_assignments(manifest: Sequence[str]) -> dict[str, tuple[str, str]]:
+    """지시서 §9-2 의 처분·owner 오라클 — unit·integration 은 A직역, ui 는 B강등/C재작성."""
+    result: dict[str, tuple[str, str]] = {}
+    for node_id in manifest:
+        source_file, _, rest = node_id.partition("::")
+        try:
+            owner = FS_OWNER_BY_FILE[source_file]
+        except KeyError as error:
+            raise EnvironmentError(
+                f"no semantic owner oracle for FS manifest row: {source_file}"
+            ) from error
+        if source_file != FS_UI_FILE:
+            disposition = "A직역"
+        elif rest.split("[", 1)[0] in FS_C_REWRITE_FUNCTIONS:
+            disposition = "C재작성"
+        else:
+            disposition = "B강등"
+        if node_id in result:
+            raise EnvironmentError(f"duplicate FS assignment node ID: {node_id}")
+        result[node_id] = (disposition, owner)
+    return result
+
+
+def check_fs_rows(
+    manifest: Sequence[str],
+    fs_rows: Sequence[BaselineRow] | None,
+    baseline_manifest: Sequence[str],
+    source_ids: set[str],
+    listed_ids: set[str],
+    planned_ids: set[str],
+) -> list[str]:
+    """FS 블록에 baseline 과 같은 규칙을 건다.
+
+    `planned_ids` 는 baseline 루프가 이미 채운 집합을 그대로 받는다 — 블록을 가로지르는
+    예약 ID 충돌은 이 공유 때문에만 잡힌다.
+    """
+    if fs_rows is None:
+        return [f"FS 블록이 없다: {FS_BEGIN}"]
+
+    problems: list[str] = []
+    manifest_set = set(manifest)
+    baseline_set = set(baseline_manifest)
+    assignment_by_node = fs_expected_assignments(manifest)
+    row_nodes = [row.node_id for row in fs_rows]
+
+    if len(fs_rows) != EXPECTED_FS_COUNT:
+        problems.append(f"FS 블록 행 수 위반: {len(fs_rows)} != {EXPECTED_FS_COUNT}")
+    missing = [node for node in manifest if node not in row_nodes]
+    if missing:
+        problems.append(f"누락 FS node ID {len(missing)}건: {missing[0]}")
+    duplicates = sorted({node for node in row_nodes if row_nodes.count(node) > 1})
+    if duplicates:
+        problems.append(f"중복 FS node ID {len(duplicates)}건: {duplicates[0]}")
+    outside = [node for node in row_nodes if node not in manifest_set]
+    if outside:
+        problems.append(f"FS manifest 밖 node ID {len(outside)}건: {outside[0]}")
+    if len(row_nodes) == len(manifest) and row_nodes != list(manifest):
+        problems.append("FS 원순서 위반")
+
+    for row in fs_rows:
+        if row.node_id in baseline_set:
+            problems.append(f"FS node ID가 baseline 본표와 겹침: {row.node_id}")
+        if row.disposition not in DISPOSITIONS:
+            problems.append(f"허용되지 않은 FS 처분: {row.node_id} -> {row.disposition!r}")
+        if row.disposition == "폐기":
+            problems.append(f"미승인 FS 폐기: {row.node_id}")
+        if row.owner not in OWNERS:
+            problems.append(f"허용되지 않은 FS owner wave: {row.node_id} -> {row.owner!r}")
+        expected = assignment_by_node.get(row.node_id)
+        if expected is not None:
+            expected_disposition, expected_owner = expected
+            if row.disposition != expected_disposition:
+                problems.append(
+                    "FS §9-2 semantic 처분 불일치: "
+                    f"{row.node_id} -> {row.disposition!r}, 기대 {expected_disposition!r}"
+                )
+            if row.owner != expected_owner:
+                problems.append(
+                    "FS 층 규칙 semantic owner 불일치: "
+                    f"{row.node_id} -> {row.owner!r}, 기대 {expected_owner!r}"
+                )
+        if not row.provenance:
+            problems.append(f"필수 FS provenance 공란: {row.node_id}")
+        elif row.provenance != POST_BASELINE_FS_PROVENANCE:
+            problems.append(f"FS provenance 오분류: {row.node_id} -> {row.provenance!r}")
+        if row.status == "planned":
+            matched = PLANNED_ID.fullmatch(row.native_id)
+            if matched is None or matched.group(1) != row.owner:
+                problems.append(f"FS planned 예약 ID 위반: {row.node_id} -> {row.native_id!r}")
+            elif row.native_id in planned_ids:
+                problems.append(f"planned 예약 ID 중복: {row.native_id}")
+            else:
+                planned_ids.add(row.native_id)
+        elif row.status == "implemented":
+            if row.native_id not in source_ids or row.native_id not in listed_ids:
+                problems.append(f"존재하지 않는 FS 신규 ID: {row.node_id} -> {row.native_id!r}")
+        else:
+            problems.append(f"허용되지 않은 FS 상태: {row.node_id} -> {row.status!r}")
+    return problems
 
 
 def expected_assignments(manifest: Sequence[str]) -> dict[str, tuple[str, str]]:
@@ -418,6 +589,7 @@ def check_rows(
     post_rows: Sequence[PostBaselineRow],
     source_ids: set[str],
     listed_ids: set[str],
+    planned_ids: set[str] | None = None,
 ) -> list[str]:
     problems: list[str] = []
     manifest_set = set(manifest)
@@ -438,7 +610,10 @@ def check_rows(
     if len(row_nodes) == len(manifest) and row_nodes != list(manifest):
         problems.append("baseline 원수집 순서 위반")
 
-    planned_ids: set[str] = set()
+    # 호출부가 집합을 주면 FS 블록과 예약 ID 를 공유한다 — 주지 않으면 종전대로 지역 집합이라
+    # baseline 단독 실행의 판정은 바뀌지 않는다(집합의 수명만 늘어난다).
+    if planned_ids is None:
+        planned_ids = set()
     for row in baseline_rows:
         if row.disposition not in DISPOSITIONS:
             problems.append(f"허용되지 않은 처분: {row.node_id} -> {row.disposition!r}")
@@ -527,6 +702,139 @@ def _synthetic_good(
     return baseline, post
 
 
+def _fs_synthetic_good(manifest: list[str]) -> list[BaselineRow]:
+    assignments = fs_expected_assignments(manifest)
+    counters = {owner: 0 for owner in OWNERS}
+    rows: list[BaselineRow] = []
+    for node in manifest:
+        disposition, owner = assignments[node]
+        counters[owner] += 1
+        rows.append(
+            BaselineRow(
+                node,
+                disposition,
+                f"PLAN-{owner}-9{counters[owner]:03d}",
+                owner,
+                "planned",
+                POST_BASELINE_FS_PROVENANCE,
+            )
+        )
+    return rows
+
+
+def _run_fs_self_test(
+    manifest_path: Path,
+    baseline_manifest: list[str],
+    baseline_planned_ids: set[str],
+    source_ids: set[str],
+    listed_ids: set[str],
+) -> int:
+    """FS 블록 축 9종 — 지시서 §1-4 P3-G 가 열거한 전건이다."""
+    try:
+        manifest = read_fs_manifest(manifest_path)
+        good = _fs_synthetic_good(manifest)
+    except EnvironmentError as error:
+        print(f"FAIL FS self-test fixture: {error}")
+        return 1
+    if check_fs_rows(manifest, good, baseline_manifest, source_ids, listed_ids, set()):
+        print("FAIL FS known-good was rejected")
+        return 1
+    counts = {
+        disposition: sum(row.disposition == disposition for row in good)
+        for disposition in ("A직역", "B강등", "C재작성")
+    }
+    print(
+        "PASS FS known-good accepted "
+        f"({EXPECTED_FS_COUNT} rows: A={counts['A직역']}, B={counts['B강등']}, "
+        f"C={counts['C재작성']})"
+    )
+
+    failures = 0
+    # 축 1: manifest SHA 불일치 — 실파일이 필요한 유일한 축이라 임시 사본으로 만든다.
+    with tempfile.TemporaryDirectory() as directory:
+        tampered = Path(directory) / "node_ids.txt"
+        tampered.write_bytes(manifest_path.read_bytes() + b"\n")
+        try:
+            read_fs_manifest(tampered)
+        except EnvironmentError as error:
+            if "FS manifest SHA-256 is" in str(error):
+                print("PASS FS seeded known-bad rejected: manifest SHA 불일치")
+            else:
+                print(f"FAIL FS seeded known-bad wrong reason: manifest SHA 불일치: {error}")
+                failures += 1
+        else:
+            print("FAIL FS seeded known-bad not rejected: manifest SHA 불일치")
+            failures += 1
+
+    cases: list[tuple[str, list[BaselineRow], set[str], str]] = []
+    cases.append(("행 누락", good[:-1], set(), "누락 FS node ID"))
+    extra = list(good) + [
+        BaselineRow(
+            "tests/unit/test_extra.py::test_extra",
+            "A직역",
+            "PLAN-W2-9999",
+            "W2",
+            "planned",
+            POST_BASELINE_FS_PROVENANCE,
+        )
+    ]
+    cases.append(("행 초과", extra, set(), "FS 블록 행 수 위반"))
+    reordered = list(good)
+    reordered[0], reordered[1] = reordered[1], reordered[0]
+    cases.append(("원순서 위반", reordered, set(), "FS 원순서 위반"))
+    nonexistent = list(good)
+    nonexistent[0] = replace(nonexistent[0], native_id="native-missing", status="implemented")
+    cases.append(("미실재 native ID", nonexistent, set(), "존재하지 않는 FS 신규 ID"))
+    wrong_disposition = list(good)
+    wrong_disposition[0] = replace(wrong_disposition[0], disposition="C재작성")
+    cases.append(("처분 값 위반", wrong_disposition, set(), "FS §9-2 semantic 처분 불일치"))
+    wrong_status = list(good)
+    wrong_status[0] = replace(wrong_status[0], status="referenced")
+    cases.append(("status 값 위반", wrong_status, set(), "허용되지 않은 FS 상태"))
+    wrong_owner = list(good)
+    wrong_owner[0] = replace(wrong_owner[0], owner="W3", native_id="PLAN-W3-9001")
+    cases.append(("owner 위반", wrong_owner, set(), "FS 층 규칙 semantic owner 불일치"))
+    # 가로지르는 축은 FS 행이 baseline 대역(PLAN-W#-0###)의 예약을 재사용하는 형태로 심는다 —
+    # seeded 집합에 FS 대역 ID 를 넣으면 baseline 예약을 하나도 안 써도 통과해 "가로지르는" 부분이
+    # 시험되지 않는다(A-P3 감사 3-1).
+    cross = sorted(
+        native_id
+        for native_id in baseline_planned_ids
+        if (matched := PLANNED_ID.fullmatch(native_id)) and matched.group(1) == good[0].owner
+    )[0]
+    cases.append(
+        (
+            "블록을 가로지르는 예약 ID 중복",
+            [replace(good[0], native_id=cross, status="planned"), *good[1:]],
+            set(baseline_planned_ids),
+            "planned 예약 ID 중복",
+        )
+    )
+
+    for name, rows, seeded_planned, expected in cases:
+        found = check_fs_rows(
+            manifest, rows, baseline_manifest, source_ids, listed_ids, set(seeded_planned)
+        )
+        if any(expected in problem for problem in found):
+            print(f"PASS FS seeded known-bad rejected: {name}")
+        else:
+            print(f"FAIL FS seeded known-bad not rejected for expected reason: {name}: {found}")
+            failures += 1
+
+    # 블록 부재도 위반이다 — 개정 이후 FS 부록은 필수다.
+    if any(
+        "FS 블록이 없다" in problem
+        for problem in check_fs_rows(
+            manifest, None, baseline_manifest, source_ids, listed_ids, set()
+        )
+    ):
+        print("PASS FS seeded known-bad rejected: FS 블록 부재")
+    else:
+        print("FAIL FS seeded known-bad not rejected: FS 블록 부재")
+        failures += 1
+    return failures
+
+
 def run_self_test() -> int:
     manifest_path = (
         Path(__file__).resolve().parent / "fixtures" / "pytest_baseline_6ccb3c7" / "node_ids.txt"
@@ -608,8 +916,13 @@ def run_self_test() -> int:
         else:
             print(f"FAIL seeded known-bad not rejected for expected reason: {name}: {found}")
             failures += 1
+    baseline_planned_ids = {row.native_id for row in good_rows}
+    fs_manifest_path = Path(__file__).resolve().parent / Path(POST_BASELINE_FS_MANIFEST_RELATIVE)
+    failures += _run_fs_self_test(
+        fs_manifest_path, manifest, baseline_planned_ids, source_ids, listed_ids
+    )
     print(
-        "self-test complete: 11 independent failure conditions rejected"
+        "self-test complete: 11 baseline + 9 FS independent failure conditions rejected"
         if not failures
         else f"self-test failures: {failures}"
     )
@@ -623,18 +936,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--register", type=Path)
     parser.add_argument("--native-root", type=Path)
     parser.add_argument("--native-exe", type=Path)
+    parser.add_argument("--fs-manifest", type=Path)
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
     required = (args.manifest, args.register, args.native_root, args.native_exe)
     if any(value is None for value in required):
         parser.error("--manifest, --register, --native-root, and --native-exe are required")
+    fs_manifest_path = args.fs_manifest or (
+        Path(__file__).resolve().parent / Path(POST_BASELINE_FS_MANIFEST_RELATIVE)
+    )
     try:
         manifest = read_manifest(args.manifest)
         baseline_rows, post_rows = read_register(args.register)
+        fs_manifest = read_fs_manifest(fs_manifest_path)
+        fs_rows = read_fs_register(args.register)
         source_ids = _source_test_names(args.native_root)
         listed_ids = _listed_test_names(args.native_exe)
-        problems = check_rows(manifest, baseline_rows, post_rows, source_ids, listed_ids)
+        planned_ids: set[str] = set()
+        problems = check_rows(
+            manifest, baseline_rows, post_rows, source_ids, listed_ids, planned_ids
+        )
+        problems += check_fs_rows(
+            fs_manifest, fs_rows, manifest, source_ids, listed_ids, planned_ids
+        )
     except EnvironmentError as error:
         print(f"environment error: {error}", file=sys.stderr)
         return 2
@@ -644,10 +969,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"register rejected: {len(problems)} violation(s)", file=sys.stderr)
         return 1
     implemented = sum(row.status == "implemented" for row in baseline_rows)
+    fs_implemented = sum(row.status == "implemented" for row in fs_rows or ())
     print(
         f"register accepted: baseline {len(baseline_rows)}, implemented {implemented}, "
         f"planned {len(baseline_rows) - implemented}, post-baseline {len(post_rows)}; "
         f"native source/list registry {len(source_ids)}/{len(listed_ids)}"
+    )
+    print(
+        f"fs: {len(fs_rows or ())} rows, implemented {fs_implemented}, "
+        f"planned {len(fs_rows or ()) - fs_implemented}"
     )
     return 0
 
