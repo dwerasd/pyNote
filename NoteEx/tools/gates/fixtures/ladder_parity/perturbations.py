@@ -60,7 +60,10 @@ def _skip_v0007(entries: Sequence) -> list:
 
 def _wrong_final_version(entries: Sequence) -> list:
     result = list(entries)
-    position = _index_of(result, 9)
+    # 교란 대상은 **마지막 등록 마이그레이션**이다. 특정 버전에 고정하면 그 뒤에 새
+    # 마이그레이션이 붙는 순간 그쪽의 schema_version 갱신이 심어 둔 잘못된 값을
+    # 덮어써 known-bad 가 미탐이 된다(v0010 도입 실측).
+    position = len(result) - 1
     result[position] = _wrap(
         result[position],
         lambda connection: connection.execute(

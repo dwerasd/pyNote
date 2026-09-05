@@ -86,7 +86,13 @@
     <ClInclude Include="include\pynote\core\application\save_coordinator.h">
       <Filter>응용</Filter>
     </ClInclude>
+    <ClInclude Include="include\pynote\core\application\file_binding_service.h">
+      <Filter>응용</Filter>
+    </ClInclude>
     <ClInclude Include="src\application\python_casefold_15_1.inc">
+      <Filter>응용</Filter>
+    </ClInclude>
+    <ClInclude Include="src\application\utf_codec_detail.h">
       <Filter>응용</Filter>
     </ClInclude>
     <ClInclude Include="src\domain\enum_spelling.h">
@@ -148,6 +154,9 @@
       <Filter>저장</Filter>
     </ClInclude>
     <ClInclude Include="include\pynote\core\storage\migrations\v0009_preview_lines_default.h">
+      <Filter>저장</Filter>
+    </ClInclude>
+    <ClInclude Include="include\pynote\core\storage\migrations\v0010_card_file_bindings.h">
       <Filter>저장</Filter>
     </ClInclude>
   </ItemGroup>
@@ -214,6 +223,9 @@
     <ClCompile Include="src\application\save_coordinator.cpp">
       <Filter>응용</Filter>
     </ClCompile>
+    <ClCompile Include="src\application\file_binding_service.cpp">
+      <Filter>응용</Filter>
+    </ClCompile>
     <ClCompile Include="..\third_party\cctz\src\civil_time_detail.cc"><Filter>third_party</Filter></ClCompile>
     <ClCompile Include="..\third_party\cctz\src\time_zone_fixed.cc"><Filter>third_party</Filter></ClCompile>
     <ClCompile Include="..\third_party\cctz\src\time_zone_format.cc"><Filter>third_party</Filter></ClCompile>
@@ -264,6 +276,9 @@
       <Filter>저장</Filter>
     </ClCompile>
     <ClCompile Include="src\storage\migrations\v0009_preview_lines_default.cpp">
+      <Filter>저장</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\migrations\v0010_card_file_bindings.cpp">
       <Filter>저장</Filter>
     </ClCompile>
   </ItemGroup>

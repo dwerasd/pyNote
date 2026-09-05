@@ -598,9 +598,11 @@ TEST_CASE("v0009 는 6 이 아닌 미리보기 줄 수를 건드리지 않는다
 }
 
 // 대응 원본: tests/integration/test_database.py::test_new_v0_database_migrates_to_latest
-TEST_CASE("빈 데이터베이스에 v1~v9 사다리를 한 번의 Run 으로 적용한다", "[core][storage][migration]")
+// 파일 결속 포팅(2026-09-05)으로 사다리가 v10 까지 오른다 - 원본 v0010_card_file_bindings 가
+// card_file_bindings 표 하나를 더해 표는 13 개, 최신 버전은 10 이다.
+TEST_CASE("빈 데이터베이스에 v1~v10 사다리를 한 번의 Run 으로 적용한다", "[core][storage][migration]")
 {
-	const C_TEMP_DB temp("ladder_v1_v9");
+	const C_TEMP_DB temp("ladder_v1_v10");
 	pynote::core::storage::C_DATABASE db;
 	REQUIRE(db.Open(temp.Utf8()));
 
@@ -608,14 +610,16 @@ TEST_CASE("빈 데이터베이스에 v1~v9 사다리를 한 번의 Run 으로 �
 	runner.SetExistingDatabase(false, temp.Utf8());
 	REQUIRE(runner.Run(db) == pynote::core::storage::E_MIGRATE_RESULT::Ok);
 
-	REQUIRE(pynote::core::storage::migrations::LatestSchemaVersion() == 9);
-	REQUIRE(scalar_int(db, "SELECT version FROM schema_version WHERE id = 1") == 9);
-	REQUIRE(db.SchemaVersion() == 9);
+	REQUIRE(pynote::core::storage::migrations::LatestSchemaVersion() == 10);
+	REQUIRE(scalar_int(db, "SELECT version FROM schema_version WHERE id = 1") == 10);
+	REQUIRE(db.SchemaVersion() == 10);
 
 	// v0001 의 11 개에서 v0004 가 workspace_state 를 빼고 data_policy_settings 와
-	// workspace_windows 가 더해져 12 개다. v0005 의 임시 테이블은 남지 않는다.
+	// workspace_windows 가 더해져 12 개, v0010 이 card_file_bindings 를 더해 13 개다.
+	// v0005 의 임시 테이블은 남지 않는다.
 	REQUIRE(scalar_int(db,
-		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'") == 12);
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'") == 13);
+	REQUIRE(has_table(db, "card_file_bindings"));
 	REQUIRE(has_table(db, "data_policy_settings"));
 	REQUIRE(has_table(db, "workspace_windows"));
 	REQUIRE_FALSE(has_table(db, "workspace_state"));

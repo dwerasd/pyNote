@@ -63,12 +63,21 @@ namespace pynote::core::domain
 		Merge
 	};
 
+	// domain/models.py 의 NewlineKind(:52~64). 철자는 card_file_bindings.newline 의 CHECK 값 그대로다.
+	enum class E_NEWLINE_KIND
+	{
+		Lf,
+		Crlf,
+		Cr
+	};
+
 	std::string_view ToText(E_CAPTURE_OPERATION_SOURCE _eValue);
 	std::string_view ToText(E_SPLIT_POLICY _eValue);
 	std::string_view ToText(E_CARD_SOURCE _eValue);
 	std::string_view ToText(E_REVISION_SOURCE _eValue);
 	std::string_view ToText(E_DRAFT_KIND _eValue);
 	std::string_view ToText(E_LINEAGE_RELATION_TYPE _eValue);
+	std::string_view ToText(E_NEWLINE_KIND _eValue);
 
 	bool FromText(std::string_view _sText, E_CAPTURE_OPERATION_SOURCE* _peValue);
 	bool FromText(std::string_view _sText, E_SPLIT_POLICY* _peValue);
@@ -76,6 +85,10 @@ namespace pynote::core::domain
 	bool FromText(std::string_view _sText, E_REVISION_SOURCE* _peValue);
 	bool FromText(std::string_view _sText, E_DRAFT_KIND* _peValue);
 	bool FromText(std::string_view _sText, E_LINEAGE_RELATION_TYPE* _peValue);
+	bool FromText(std::string_view _sText, E_NEWLINE_KIND* _peValue);
+
+	// 원본 NewlineKind.characters(:59~64) 다. 결속 파일에 기록할 줄바꿈 문자열을 돌려준다.
+	std::string_view NewlineCharacters(E_NEWLINE_KIND _eValue);
 
 	// 아래 구조체는 파이썬 원본 dataclass 의 필드 순서와 이름을 그대로 옮긴 것이다.
 	// nullable 열은 std::optional 이고 텍스트는 UTF-8 을 담은 std::string 이다.
@@ -161,6 +174,26 @@ namespace pynote::core::domain
 
 		// 원본 dataclass 가 __eq__ 를 만들어 주고 시험이 그 동치를 계약으로 쓴다.
 		bool operator==(const S_DRAFT&) const = default;
+	};
+
+	// domain/models.py 의 FileBinding(:130~145). 카드 한 장과 디스크 파일 한 개의 결속 상태다.
+	struct S_FILE_BINDING
+	{
+		std::string                 sCardId;
+		std::string                 sPath;
+		std::string                 sPathKey;
+		std::string                 sEncoding;
+		bool                        bBom{ false };
+		E_NEWLINE_KIND              eNewline{ E_NEWLINE_KIND::Lf };
+		bool                        bTrailingNewline{ false };
+		std::int64_t                nBoundAtUs{ 0 };
+		std::optional<std::int64_t> nSyncedSize{};
+		std::optional<std::int64_t> nSyncedMtimeNs{};
+		std::optional<std::string>  sSyncedHash{};
+		std::optional<std::int64_t> nSyncedAtUs{};
+
+		// 원본 dataclass 가 __eq__ 를 만들어 주고 시험이 그 동치를 계약으로 쓴다.
+		bool operator==(const S_FILE_BINDING&) const = default;
 	};
 
 	// domain/models.py 의 CardLineage(:115~120).

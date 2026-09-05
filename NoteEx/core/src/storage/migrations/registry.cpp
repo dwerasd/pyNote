@@ -9,6 +9,7 @@
 #include "pynote/core/storage/migrations/v0007_vertical_split_reset.h"
 #include "pynote/core/storage/migrations/v0008_horizontal_split_reset.h"
 #include "pynote/core/storage/migrations/v0009_preview_lines_default.h"
+#include "pynote/core/storage/migrations/v0010_card_file_bindings.h"
 
 #include <iterator>
 
@@ -27,10 +28,11 @@ namespace pynote::core::storage::migrations
 			{ 6, &v0006::Migrate },
 			{ 7, &v0007::Migrate },
 			{ 8, &v0008::Migrate },
-			{ 9, &v0009::Migrate }
+			{ 9, &v0009::Migrate },
+			{ 10, &v0010::Migrate }
 		};
 
-		static_assert(std::size(MIGRATIONS) == 9, "원본 MIGRATIONS 튜플과 같은 아홉 본이어야 한다.");
+		static_assert(std::size(MIGRATIONS) == 10, "원본 MIGRATIONS 튜플과 같은 열 본이어야 한다.");
 	}
 
 	std::span<const S_MIGRATION> Registry() noexcept

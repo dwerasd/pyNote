@@ -37,6 +37,9 @@
     <ClInclude Include="..\platform\include\pynote\platform\win32_device_settings.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
+    <ClInclude Include="..\platform\include\pynote\platform\win32_file_binding_support.h">
+      <Filter>플랫폼</Filter>
+    </ClInclude>
     <ClInclude Include="..\platform\include\pynote\platform\win32_file_system.h">
       <Filter>플랫폼</Filter>
     </ClInclude>
@@ -156,6 +159,18 @@
     <ClCompile Include="unit\repositories_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
+    <ClCompile Include="unit\migration_v0010_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\file_binding_repository_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\file_binding_service_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\win32_file_binding_support_test.cpp">
+      <Filter>단위 시험</Filter>
+    </ClCompile>
     <ClCompile Include="unit\repositories_cas_test.cpp">
       <Filter>단위 시험</Filter>
     </ClCompile>
@@ -179,6 +194,9 @@
     </ClCompile>
     <ClCompile Include="unit\window_lifecycle_test.cpp">
       <Filter>단위 시험</Filter>
+    </ClCompile>
+    <ClCompile Include="..\platform\src\win32_file_binding_support.cpp">
+      <Filter>플랫폼</Filter>
     </ClCompile>
     <ClCompile Include="..\platform\src\win32_file_system.cpp">
       <Filter>플랫폼</Filter>

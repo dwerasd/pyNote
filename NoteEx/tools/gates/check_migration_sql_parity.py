@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""마이그레이션 SQL 문장 축자(逐字) 이식 게이트(v0001~v0009 전건).
+"""마이그레이션 SQL 문장 축자(逐字) 이식 게이트(v0001~v0010 전건).
 
 파이썬 원본 `migrate()` 가 **실제로 발행하는 문장**과, 그 C++ 이식본이 담은
 `u8R"SQL( ... )SQL"` 원시 문자열 리터럴을 **순서대로 바이트 단위 대조**한다.
@@ -42,7 +42,7 @@
 아무것도 증명하지 못하므로, 이 파일에는 스키마 SQL 이 한 줄도 들어 있지 않다.
 
 종료 코드:
-  0  통과(아홉 쌍 전건, 문장 수·내용·접두 일치)
+  0  통과(등록된 짝 전건, 문장 수·내용·접두 일치)
   1  불일치 검출(또는 자기시험 기대 불일치)
   2  사용법·환경 오류(경로 없음, 적재 실패, **C++ 이식본 없음**, **추출 대상 0건**)
 
@@ -363,7 +363,7 @@ def _report_pair(result: PairResult) -> None:
 
 
 def run_check(cpp_dir: Path | None = None) -> int:
-    """아홉 쌍을 전건 대조한다. 종료 코드를 돌려준다."""
+    """등록된 짝을 전건 대조한다. 종료 코드를 돌려준다."""
     root = reference.CPP_MIGRATIONS_DIR if cpp_dir is None else cpp_dir
     try:
         entries = reference.load_registry()
@@ -607,7 +607,7 @@ def run_self_test() -> int:
             print(f"  FAIL  실제 원본 적재 실패 - {exc}")
             return 2
 
-        # 4-a) 아홉 짝이 다 있지만 전부 리터럴 0건인 디렉터리.
+        # 4-a) 짝이 다 있지만 전부 리터럴 0건인 디렉터리.
         zero_dir = work_dir / "cpp_zero"
         zero_dir.mkdir()
         for entry in entries:
@@ -637,7 +637,7 @@ def run_self_test() -> int:
             print(f"  FAIL  이식본 부재: 종료 코드 {code}(기대 2)")
             failures += 1
 
-        print("[방향 5] 실제 아홉 쌍의 파이썬 쪽이 적재·발행되는가")
+        print("[방향 5] 실제 등록된 짝의 파이썬 쪽이 적재·발행되는가")
         try:
             captured = reference.capture_statements(
                 entries, work_dir / "real_ladder.db", 1_700_000_000_000_000
@@ -676,7 +676,7 @@ def run_self_test() -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     reference.force_utf8_output()
     parser = argparse.ArgumentParser(
-        description="마이그레이션 SQL 문장의 파이썬 <-> C++ 축자 대조(v0001~v0009)",
+        description="마이그레이션 SQL 문장의 파이썬 <-> C++ 축자 대조(v0001~v0010)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

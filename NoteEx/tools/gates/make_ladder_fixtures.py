@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """사다리 시험용 중간 버전 데이터베이스 생성기.
 
-버전 1~8 각각에 대해 **그 버전에 정확히 머무는** 데이터베이스를 만든다. 사다리
-게이트가 이것을 두 벌 복사해 한 벌은 파이썬 러너로, 한 벌은 C++ 러너로 v9 까지
+버전 1~9 각각에 대해 **그 버전에 정확히 머무는** 데이터베이스를 만든다. 사다리
+게이트가 이것을 두 벌 복사해 한 벌은 파이썬 러너로, 한 벌은 C++ 러너로 최신 버전까지
 올린 뒤 결과를 대조한다.
 
 **빈 테이블 위의 사다리는 재미있는 것을 전부 건너뛴다.** 그래서 이 도구가 만드는
@@ -65,7 +65,7 @@ FIXTURE_WINDOW_IDS = (
 )
 
 # fixture 가 만들 수 있는 버전 범위(사다리 게이트가 쓰는 구간).
-FIXTURE_VERSIONS = tuple(range(1, 9))
+FIXTURE_VERSIONS = tuple(range(1, 10))
 
 
 def _seed_base(connection: sqlite3.Connection) -> None:
@@ -225,7 +225,7 @@ def build_fixture(
 
 
 def build_all(out_dir: Path, entries: Sequence[MigrationEntry]) -> list[Path]:
-    """v0001.db ~ v0008.db 를 만든다."""
+    """v0001.db ~ v0009.db 를 만든다."""
     out_dir.mkdir(parents=True, exist_ok=True)
     produced: list[Path] = []
     for version in FIXTURE_VERSIONS:

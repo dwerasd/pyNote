@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""사다리 동등성 게이트(파이썬 러너 <-> C++ 러너, v1~v9 전 구간).
+"""사다리 동등성 게이트(파이썬 러너 <-> C++ 러너, v1~최신 전 구간).
 
 두 경로를 본다.
 
-  경로 A - 빈 데이터베이스에서 한 번에 v9 까지. 양쪽이 각자 처음부터 만든다.
-  경로 B - N = 1..8 각각에 대해, **정확히 버전 N 에 머무는** 데이터베이스를
-           똑같이 두 벌 복사해 한 벌은 파이썬 러너가, 한 벌은 C++ 러너가 v9 까지
+  경로 A - 빈 데이터베이스에서 한 번에 최신까지. 양쪽이 각자 처음부터 만든다.
+  경로 B - N = 1..(최신-1) 각각에 대해, **정확히 버전 N 에 머무는** 데이터베이스를
+           똑같이 두 벌 복사해 한 벌은 파이썬 러너가, 한 벌은 C++ 러너가 최신까지
            올린다. 기존 사용자 데이터베이스가 갱신되는 실제 상황이 이쪽이다.
 
 경로 B 의 fixture 는 `make_ladder_fixtures.py` 가 만들며 **실제 행이 들어 있다.**
@@ -284,7 +284,7 @@ def _preflight(exe: Path, timeout: float) -> int:
 
 
 def run_check(exe: Path, timeout: float = RUN_TIMEOUT_SECONDS) -> int:
-    """경로 A 와 경로 B(N=1..8)를 전건 대조한다."""
+    """경로 A 와 경로 B(N=1..최신-1)를 전건 대조한다."""
     code = _preflight(exe, timeout)
     if code != 0:
         return code
@@ -330,10 +330,10 @@ def run_check(exe: Path, timeout: float = RUN_TIMEOUT_SECONDS) -> int:
             return 2
 
         results.append(
-            compare_databases("경로A(빈 DB -> v9)", 0, python_db, cpp_db, latest)
+            compare_databases(f"경로A(빈 DB -> v{latest})", 0, python_db, cpp_db, latest)
         )
 
-        # 경로 B - 버전 N fixture 를 두 벌 복사해 각자 v9 까지 올린다.
+        # 경로 B - 버전 N fixture 를 두 벌 복사해 각자 최신까지 올린다.
         fixture_dir = work_dir / "fixtures"
         for version in fixtures.FIXTURE_VERSIONS:
             try:
@@ -400,7 +400,7 @@ def run_check(exe: Path, timeout: float = RUN_TIMEOUT_SECONDS) -> int:
 
             results.append(
                 compare_databases(
-                    f"경로B(v{version} -> v9)", version, python_side, cpp_side, latest
+                    f"경로B(v{version} -> v{latest})", version, python_side, cpp_side, latest
                 )
             )
 
@@ -481,7 +481,7 @@ def _ladder_paths(
     candidate(right)
     results.append(
         compare_databases(
-            "경로A(빈 DB -> v9)", 0, left, right, latest, "reference", "candidate"
+            f"경로A(빈 DB -> v{latest})", 0, left, right, latest, "reference", "candidate"
         )
     )
 
@@ -497,7 +497,7 @@ def _ladder_paths(
         candidate(right)
         results.append(
             compare_databases(
-                f"경로B(v{version} -> v9)",
+                f"경로B(v{version} -> v{latest})",
                 version,
                 left,
                 right,
@@ -678,7 +678,7 @@ def run_self_test() -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     reference.force_utf8_output()
     parser = argparse.ArgumentParser(
-        description="사다리 동등성 대조(빈 DB -> v9, v1..v8 -> v9)",
+        description="사다리 동등성 대조(빈 DB -> 최신, v1..(최신-1) -> 최신)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

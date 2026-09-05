@@ -108,6 +108,15 @@ namespace pynote::core::storage
 
 		E_REPO_RESULT DeleteCard(const std::string& _sCardId);
 
+		// card_file_bindings ------------------------------------------------------------------
+		// 원본 repositories.py:485~554 의 다섯 메서드다. 조회 셋은 행이 없으면 NotFound 이고,
+		// 그 자리가 원본의 None 이다. FindActiveBindingByPath 만 휴지통 카드의 행을 걸러낸다.
+		E_REPO_RESULT GetFileBinding(const std::string& _sCardId, domain::S_FILE_BINDING* _pOut);
+		E_REPO_RESULT FindActiveBindingByPath(const std::string& _sPathKey, domain::S_FILE_BINDING* _pOut);
+		E_REPO_RESULT FindBindingByPath(const std::string& _sPathKey, domain::S_FILE_BINDING* _pOut);
+		E_REPO_RESULT UpsertFileBinding(const domain::S_FILE_BINDING& _Binding);
+		E_REPO_RESULT DeleteFileBinding(const std::string& _sCardId);
+
 		// card_revisions ----------------------------------------------------------------------
 		E_REPO_RESULT CreateRevision(const domain::S_CARD_REVISION& _Revision);
 		E_REPO_RESULT GetRevision(const std::string& _sRevisionId, domain::S_CARD_REVISION* _pOut);

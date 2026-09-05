@@ -270,6 +270,18 @@ def canonical_py(node: ast.expr) -> tuple[str | None, str]:
     """파이썬 파라미터 식을 (소유자, 이름) 으로 접는다."""
     parts: list[str] = []
     cursor: ast.expr = node
+    # `int(binding.bom)` 처럼 값을 보존하는 단일 인자 `int(...)` 래퍼는 C++ 쪽 TRANSPARENT_CALLS 의
+    # `ToText(...)` 와 같은 자리다 - bool 열을 INTEGER 0/1 로 넘기는 관용구(repositories.py
+    # upsert_file_binding)라 안쪽 이름 경로를 그대로 사상한다. 인자가 둘 이상이거나 다른 호출이면
+    # 여전히 사상 실패다(값을 옮기는지 알 수 없다).
+    if (
+        isinstance(cursor, ast.Call)
+        and isinstance(cursor.func, ast.Name)
+        and cursor.func.id == "int"
+        and len(cursor.args) == 1
+        and not cursor.keywords
+    ):
+        cursor = cursor.args[0]
     while isinstance(cursor, ast.Attribute):
         parts.append(cursor.attr)
         cursor = cursor.value
@@ -723,6 +735,8 @@ def run_self_test() -> int:
         "bad_orphan_literal.cpp",
         "bad_unmappable_expression.cpp",
         "bad_unmappable_param.py",
+        "bad_int_wrapper_swapped.py",
+        "bad_unmappable_call.py",
     ]
     absent = [name for name in required if not (FIXTURE_DIR / name).is_file()]
     if absent:
@@ -759,6 +773,20 @@ def run_self_test() -> int:
             "good.cpp",
             "사상 실패",
         ),
+        # int(...) 래퍼는 안쪽 이름으로 사상돼야 뒤바뀜이 잡힌다(래퍼를 통째로 투명 처리하면 미탐).
+        (
+            "int 래퍼 안 이름 뒤바뀜",
+            _fixture("bad_int_wrapper_swapped.py"),
+            "good.cpp",
+            "값 대응 어긋남",
+        ),
+        # 래퍼 벗기기는 단일 인자 int(...) 에만 열려 있다 - 인자 둘인 호출은 여전히 사상 실패다.
+        (
+            "인자 둘인 파이썬 호출",
+            _fixture("bad_unmappable_call.py"),
+            "good.cpp",
+            "사상 실패",
+        ),
     ]
     for name, py_source, cpp_name, expected in cases:
         found, _ = compare_pair(py_source, _fixture(cpp_name), "case.py", "case.cpp")
@@ -784,7 +812,7 @@ def run_self_test() -> int:
             failures += 1
 
     print(
-        "자기시험 PASS: 정상 1건 수용, 결함 8종 전건 거부, 실제 이식본 추출 확인"
+        "자기시험 PASS: 정상 1건 수용, 결함 10종 전건 거부, 실제 이식본 추출 확인"
         if failures == 0
         else f"자기시험 실패 {failures} 건"
     )

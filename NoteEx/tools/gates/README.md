@@ -75,7 +75,7 @@ core 파일이 걸렸다면 그 코드는 core 에 있으면 안 되는 코드�
 
 ---
 
-# 마이그레이션 SQL 축자 이식 게이트 (v0001~v0009)
+# 마이그레이션 SQL 축자 이식 게이트 (v0001~v0010)
 
 `check_migration_sql_parity.py` 는 파이썬 원본 `migrate()` 가 **실제로 발행하는
 문장**과 그 C++ 이식본의 `u8R"SQL( ... )SQL"` 리터럴을 **순서대로 바이트 단위**로
@@ -268,15 +268,15 @@ C++ 빌드에 의존하지 않고 파이썬 러너만으로 돈다.
 
 ---
 
-# 사다리 동등성 게이트 (v1~v9 전 구간)
+# 사다리 동등성 게이트 (v1~최신 전 구간)
 
 `check_migration_ladder_parity.py` 는 두 러너가 **같은 사다리를 올랐을 때 같은 곳에
 도착하는지** 본다. 위의 두 게이트가 각각 소스와 신규 생성 결과를 보는 데 비해, 이쪽은
 **기존 사용자 데이터베이스가 갱신되는 실제 경로**와 **행 데이터**를 본다.
 
-경로 A 는 빈 데이터베이스에서 한 번에 v9 까지 간다. 경로 B 는 N = 1..8 각각에 대해
-정확히 버전 N 에 머무는 데이터베이스를 두 벌 복사해 한 벌은 파이썬이, 한 벌은 C++ 이
-v9 로 올린다.
+경로 A 는 빈 데이터베이스에서 한 번에 최신 버전까지 간다. 경로 B 는 N = 1..(최신-1)
+각각에 대해 정확히 버전 N 에 머무는 데이터베이스를 두 벌 복사해 한 벌은 파이썬이,
+한 벌은 C++ 이 최신 버전으로 올린다.
 
 ## 왜 fixture 에 행이 들어 있어야 하나
 
@@ -307,7 +307,7 @@ fixture 가 들고 온 것이므로 그대로 대조한다 - 무조건 가리면
 # 1) C++ 빌드 없이 게이트 자신을 검증한다(--exe 무시)
 python tools/gates/check_migration_ladder_parity.py --self-test
 
-# 2) 실제 두 러너로 9경로를 올린다
+# 2) 실제 두 러너로 전 경로(경로 A + fixture 수)를 올린다
 python tools/gates/check_migration_ladder_parity.py
 python tools/gates/check_migration_ladder_parity.py \
   --exe NoteEx/x64/ReleaseMD/NoteExTests.exe --timeout 120
@@ -331,8 +331,8 @@ python tools/gates/check_migration_ladder_parity.py \
 
 # 사다리 fixture 생성기
 
-`make_ladder_fixtures.py` 는 게이트가 아니라 **입력 생성기**다. `v0001.db` ~ `v0008.db`
-를 만들고 입력·산출 SHA-256 을 기록한다. 입력 목록에는 마이그레이션 원본 아홉 본과 이
+`make_ladder_fixtures.py` 는 게이트가 아니라 **입력 생성기**다. `v0001.db` ~ `v0009.db`
+를 만들고 입력·산출 SHA-256 을 기록한다. 입력 목록에는 마이그레이션 원본 전건과 이
 도구 자신, 공용 모듈이 들어간다 - 그중 무엇이 바뀌어도 fixture 를 다시 만들어야 한다는
 뜻이다.
 
@@ -343,6 +343,22 @@ python tools/gates/make_ladder_fixtures.py --out fixtures/ladder_parity
 
 `--self-test` 는 만들어진 fixture 가 **의도한 버전에 머물고 의도한 행을 담는지** 본다.
 버전만 맞고 표가 비어 있으면 사다리가 아무것도 시험하지 못하므로 그것도 실패다.
+
+---
+
+# 골든 캡처 (capture_*_golden.py)
+
+`capture_*_golden.py` 는 파이썬 원본의 출력을 결정적 ASCII 줄로 뽑고, 같은 줄을 네이티브
+시험이 환경변수로 지정한 파일에 낸다. 두 파일을 **정규화 없이 바이트로** 비교한다.
+
+`capture_file_binding_golden.py` 의 ANSI(`mbcs`) 벡터는 실행 기계의 코드 페이지(이 기계는
+CP949)에 종속되므로 **파이썬 쪽과 네이티브 쪽을 같은 기계에서 뽑아야 한다.**
+
+```bash
+python tools/gates/capture_file_binding_golden.py --source-root <저장소 루트> --output <파이썬 산출>
+# 네이티브 쪽
+#   PYNOTE_FILE_BINDING_GOLDEN_OUT=<네이티브 산출> NoteExTests.exe "[FS-port]"
+```
 
 ---
 
@@ -407,7 +423,9 @@ python tools/gates/check_repository_sql_parity.py \
 
 파이썬은 위치로 말하고 C++ 은 이름(인덱스)으로 말하므로 둘을 이으려면
 `card.updated_at_us` <-> `_Card.nUpdatedAtUs` 같은 이름 사상이 필요하다. 규칙은
-`domain::ToText(...)`·열거형 `.value` 를 벗기고, 헝가리안 접두를 떼고, CamelCase 를
+`domain::ToText(...)`·열거형 `.value` 를 벗기고, 파이썬 쪽의 단일 인자 `int(...)` 래퍼
+(bool 열을 INTEGER 0/1 로 넘기는 관용구 — `upsert_file_binding` 의 `int(binding.bom)`,
+2026-09-05 파일 결속 포팅에서 추가)를 벗기고, 헝가리안 접두를 떼고, CamelCase 를
 snake_case 로 접는 것이다. **접을 수 없는 식은 건너뛰지 않고 위반이다** — 함수 호출,
 첨자, 연산식, 헝가리안도 snake 도 아닌 식별자가 나오면 그 자리를 실패로 보고한다.
 모르는 것을 조용히 넘기는 검사기는 없느니만 못하다. 통과라고 보고하기 때문이다.

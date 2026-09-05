@@ -14,6 +14,6 @@ namespace pynote::core::storage::migrations
 	std::span<const S_MIGRATION> Registry() noexcept;
 
 	// 원본 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0] 과 같은 값이다(__init__.py:44).
-	// v10 은 없다 - 스키마 무변경이 설계 확정 사항이라 이 값의 상한은 9 다.
+	// v10 이 카드 결속 표 card_file_bindings 를 만든다.
 	int LatestSchemaVersion() noexcept;
 }

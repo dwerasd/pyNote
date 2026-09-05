@@ -748,6 +748,25 @@ namespace
 		return(true);
 	}
 
+	// 원본 _file_binding_from_row(:942~956) 자리다. bom 과 trailing_newline 은 INTEGER 0/1 이라
+	// 0 이 아니면 참으로 접는다(원본 bool(row[...]) 과 같은 판정이다).
+	bool map_file_binding(pynote::core::storage::C_DATABASE& _database, sqlite3_stmt* _pStmt, pynote::core::domain::S_FILE_BINDING* _pOut)
+	{
+		_pOut->sCardId   = column_text(_pStmt, "card_id");
+		_pOut->sPath     = column_text(_pStmt, "path");
+		_pOut->sPathKey  = column_text(_pStmt, "path_key");
+		_pOut->sEncoding = column_text(_pStmt, "encoding");
+		_pOut->bBom      = column_int64(_pStmt, "bom") != 0;
+		if (!read_enum(_database, _pStmt, "newline", "card_file_bindings.newline", &_pOut->eNewline)) { return(false); }
+		_pOut->bTrailingNewline = column_int64(_pStmt, "trailing_newline") != 0;
+		_pOut->nBoundAtUs       = column_int64(_pStmt, "bound_at_us");
+		_pOut->nSyncedSize      = column_nullable_int64(_pStmt, "synced_size");
+		_pOut->nSyncedMtimeNs   = column_nullable_int64(_pStmt, "synced_mtime_ns");
+		_pOut->sSyncedHash      = column_nullable_text(_pStmt, "synced_hash");
+		_pOut->nSyncedAtUs      = column_nullable_int64(_pStmt, "synced_at_us");
+		return(true);
+	}
+
 	bool map_revision(pynote::core::storage::C_DATABASE& _database, sqlite3_stmt* _pStmt, pynote::core::domain::S_CARD_REVISION* _pOut)
 	{
 		_pOut->sId               = column_text(_pStmt, "id");
@@ -1493,6 +1512,100 @@ namespace pynote::core::storage
 	E_REPO_RESULT C_REPOSITORIES::DeleteCard(const std::string& _sCardId)
 	{
 		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(DELETE FROM cards WHERE id = ?)SQL");
+		if (!Stmt.IsPrepared()) { return(this->fail_()); }
+		Stmt.BindText(1, _sCardId);
+		return(run_done(m_Database, Stmt));
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// card_file_bindings
+	// ------------------------------------------------------------------------------------------
+	E_REPO_RESULT C_REPOSITORIES::GetFileBinding(const std::string& _sCardId, domain::S_FILE_BINDING* _pOut)
+	{
+		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(SELECT * FROM card_file_bindings WHERE card_id = ?)SQL");
+		if (!Stmt.IsPrepared()) { return(this->fail_()); }
+		Stmt.BindText(1, _sCardId);
+		if (!Stmt.BindOk()) { return(this->fail_()); }
+
+		const int nStep = Stmt.Step();
+		if (nStep == SQLITE_DONE) { return(E_REPO_RESULT::NotFound); }
+		if (nStep != SQLITE_ROW) { return(this->fail_()); }
+		return(map_file_binding(m_Database, Stmt.Handle(), _pOut) ? E_REPO_RESULT::Ok : E_REPO_RESULT::Invalid);
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::FindActiveBindingByPath(const std::string& _sPathKey, domain::S_FILE_BINDING* _pOut)
+	{
+		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(
+            SELECT card_file_bindings.*
+            FROM card_file_bindings
+            JOIN cards ON cards.id = card_file_bindings.card_id
+            WHERE card_file_bindings.path_key = ? AND cards.deleted_at_us IS NULL
+            )SQL");
+		if (!Stmt.IsPrepared()) { return(this->fail_()); }
+		Stmt.BindText(1, _sPathKey);
+		if (!Stmt.BindOk()) { return(this->fail_()); }
+
+		const int nStep = Stmt.Step();
+		if (nStep == SQLITE_DONE) { return(E_REPO_RESULT::NotFound); }
+		if (nStep != SQLITE_ROW) { return(this->fail_()); }
+		return(map_file_binding(m_Database, Stmt.Handle(), _pOut) ? E_REPO_RESULT::Ok : E_REPO_RESULT::Invalid);
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::FindBindingByPath(const std::string& _sPathKey, domain::S_FILE_BINDING* _pOut)
+	{
+		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(SELECT * FROM card_file_bindings WHERE path_key = ?)SQL");
+		if (!Stmt.IsPrepared()) { return(this->fail_()); }
+		Stmt.BindText(1, _sPathKey);
+		if (!Stmt.BindOk()) { return(this->fail_()); }
+
+		const int nStep = Stmt.Step();
+		if (nStep == SQLITE_DONE) { return(E_REPO_RESULT::NotFound); }
+		if (nStep != SQLITE_ROW) { return(this->fail_()); }
+		return(map_file_binding(m_Database, Stmt.Handle(), _pOut) ? E_REPO_RESULT::Ok : E_REPO_RESULT::Invalid);
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::UpsertFileBinding(const domain::S_FILE_BINDING& _Binding)
+	{
+		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(
+            INSERT INTO card_file_bindings(
+                card_id, path, path_key, encoding, bom, newline, trailing_newline,
+                synced_size, synced_mtime_ns, synced_hash, bound_at_us, synced_at_us
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(card_id) DO UPDATE SET
+                path = excluded.path,
+                path_key = excluded.path_key,
+                encoding = excluded.encoding,
+                bom = excluded.bom,
+                newline = excluded.newline,
+                trailing_newline = excluded.trailing_newline,
+                synced_size = excluded.synced_size,
+                synced_mtime_ns = excluded.synced_mtime_ns,
+                synced_hash = excluded.synced_hash,
+                bound_at_us = excluded.bound_at_us,
+                synced_at_us = excluded.synced_at_us
+            )SQL");
+		if (!Stmt.IsPrepared()) { return(this->fail_()); }
+		Stmt.BindText(1, _Binding.sCardId);
+		Stmt.BindText(2, _Binding.sPath);
+		Stmt.BindText(3, _Binding.sPathKey);
+		Stmt.BindText(4, _Binding.sEncoding);
+		// bool 은 암묵 변환으로 0/1 이 된다 - 원본 int(binding.bom) 자리. 조건식으로 쓰면
+		// 바인드 순서 게이트가 이름 경로로 사상하지 못한다(check_bind_order.py).
+		Stmt.BindInt64(5, _Binding.bBom);
+		Stmt.BindText(6, domain::ToText(_Binding.eNewline));
+		Stmt.BindInt64(7, _Binding.bTrailingNewline);
+		Stmt.BindNullableInt64(8, _Binding.nSyncedSize);
+		Stmt.BindNullableInt64(9, _Binding.nSyncedMtimeNs);
+		Stmt.BindNullableText(10, _Binding.sSyncedHash);
+		Stmt.BindInt64(11, _Binding.nBoundAtUs);
+		Stmt.BindNullableInt64(12, _Binding.nSyncedAtUs);
+		return(run_done(m_Database, Stmt));
+	}
+
+	E_REPO_RESULT C_REPOSITORIES::DeleteFileBinding(const std::string& _sCardId)
+	{
+		C_STATEMENT Stmt(m_Database.Handle(), u8R"SQL(DELETE FROM card_file_bindings WHERE card_id = ?)SQL");
 		if (!Stmt.IsPrepared()) { return(this->fail_()); }
 		Stmt.BindText(1, _sCardId);
 		return(run_done(m_Database, Stmt));

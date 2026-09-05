@@ -8,6 +8,7 @@ namespace
 	using pynote::core::domain::E_CARD_SOURCE;
 	using pynote::core::domain::E_DRAFT_KIND;
 	using pynote::core::domain::E_LINEAGE_RELATION_TYPE;
+	using pynote::core::domain::E_NEWLINE_KIND;
 	using pynote::core::domain::E_REVISION_SOURCE;
 	using pynote::core::domain::E_SPLIT_POLICY;
 	using pynote::core::domain::detail::S_SPELLING;
@@ -55,6 +56,12 @@ namespace
 		{ "split", E_LINEAGE_RELATION_TYPE::Split },
 		{ "merge", E_LINEAGE_RELATION_TYPE::Merge },
 	};
+
+	const S_SPELLING<E_NEWLINE_KIND> NEWLINE_KIND_TABLE[] = {
+		{ "lf",   E_NEWLINE_KIND::Lf   },
+		{ "crlf", E_NEWLINE_KIND::Crlf },
+		{ "cr",   E_NEWLINE_KIND::Cr   },
+	};
 }
 
 namespace pynote::core::domain
@@ -89,6 +96,11 @@ namespace pynote::core::domain
 		return(detail::SpellingToText(LINEAGE_RELATION_TYPE_TABLE, _eValue));
 	}
 
+	std::string_view ToText(E_NEWLINE_KIND _eValue)
+	{
+		return(detail::SpellingToText(NEWLINE_KIND_TABLE, _eValue));
+	}
+
 	bool FromText(std::string_view _sText, E_CAPTURE_OPERATION_SOURCE* _peValue)
 	{
 		return(detail::SpellingFromText(CAPTURE_OPERATION_SOURCE_TABLE, _sText, _peValue));
@@ -117,5 +129,17 @@ namespace pynote::core::domain
 	bool FromText(std::string_view _sText, E_LINEAGE_RELATION_TYPE* _peValue)
 	{
 		return(detail::SpellingFromText(LINEAGE_RELATION_TYPE_TABLE, _sText, _peValue));
+	}
+
+	bool FromText(std::string_view _sText, E_NEWLINE_KIND* _peValue)
+	{
+		return(detail::SpellingFromText(NEWLINE_KIND_TABLE, _sText, _peValue));
+	}
+
+	std::string_view NewlineCharacters(E_NEWLINE_KIND _eValue)
+	{
+		// 원본 NewlineKind.characters(:59~64) 의 분기 그대로다.
+		if (_eValue == E_NEWLINE_KIND::Crlf) { return("\r\n"); }
+		return(_eValue == E_NEWLINE_KIND::Cr ? "\r" : "\n");
 	}
 }
