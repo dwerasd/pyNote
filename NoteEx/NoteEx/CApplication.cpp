@@ -774,6 +774,9 @@ CApplication::E_INITIALIZE_RESULT CApplication::Initialize(
 	}
 	if (!g_pLog) { g_pLog = new dk::C_LOG(L"log-NoteEx"); }
 	m_pState->Module.Init(nullptr, _hInstance);
+	// 카드 드래그 앤 드롭(RegisterDragDrop·DoDragDrop)은 OLE 아파트를 요구한다. 프로세스에
+	// 한 번만 걸고 편집면 RichEdit 이 살아 있는 동안 유지한다(W4 S4 spec §3.7.1).
+	::OleInitialize(nullptr);
 	m_pState->Module.AddMessageLoop(&m_pState->MessageLoop);
 	m_pState->bModuleInitialized = true;
 	const auto Accelerators = C_MAIN::RuntimeAccelerators();
@@ -884,6 +887,9 @@ void CApplication::Shutdown()
 			m_pState->bMessageFilterRegistered = false;
 		}
 		m_pState->Module.RemoveMessageLoop();
+		// Module.Term 바로 앞이다 - 픽스처 단위로 내리면 RichEdit 이 아직 쥔 개체 아래에서
+		// OLE 를 걷게 된다(W4 S4 spec §3.7.1).
+		::OleUninitialize();
 		m_pState->Module.Term();
 		m_pState->bModuleInitialized = false;
 	}

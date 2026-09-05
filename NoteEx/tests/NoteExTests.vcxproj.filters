@@ -273,6 +273,9 @@
 	<ClCompile Include="harness\src\w4_card_wheel_test.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>
+	<ClCompile Include="harness\src\w4_card_dnd_test.cpp">
+	  <Filter>하네스</Filter>
+	</ClCompile>
 	<ClCompile Include="harness\src\w3_settings_bus_status_test.cpp">
 	  <Filter>하네스</Filter>
 	</ClCompile>

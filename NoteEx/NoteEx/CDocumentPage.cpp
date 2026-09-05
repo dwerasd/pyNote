@@ -106,6 +106,7 @@ struct C_DOCUMENT_PAGE::S_STATE
 	// 행 <-> 카드 매핑과 선택은 프로젝션이 단독 소유한다(구 ListCardIds 중복 소유 제거).
 	C_CARD_LIST CardList;
 	C_DOCUMENT_PAGE::LeavePrompt LeavePrompt;
+	C_DOCUMENT_PAGE::DragDeletePrompt DragDelete;
 	C_DOCUMENT_PAGE::ChangeNotifier Notifier;
 	// 보기 메뉴로 켠 다중 선택. Init 이 프로젝션을 만든 직후 다시 건다(새 창도 영속값에서 시작).
 	bool bMultiSelectionEnabled{ false };
@@ -256,6 +257,42 @@ struct C_DOCUMENT_PAGE::S_STATE
 		this->set_editor_text({});
 	}
 
+	// 원본 card_editor.discard_session_for_deleted_card(:619~632)의 쌍둥이다. 위
+	// release_if_removed_ 의 해제·비움 꼬리를 그대로 쓰되 더티 보호(:249)는 없다 - 초안은
+	// 이미 SoftDelete 에 discard 로 넘겼고, 여기서 다시 보호하면 사용자가 버리기로 한 초안이
+	// 복구 후보로 남는다(W4 S4 spec §3.3.7).
+	// CEILING: 원본은 _prepare_empty_surface() 실패 시 연결을 유지하지만 W3 첫 입력 모델에는
+	// NEW backing 초안이 없어 대응물이 없다 - release_if_removed_ 와 같은 처분이다.
+	void discard_session_for_deleted_card_()
+	{
+		if (!sDraftId) { return; }
+		pDraftCoordinator->ReleaseSession(*sDraftId);
+		sDraftId.reset();
+		sCurrentCardId.reset();
+		FirstInput->ResetAfterAcceptedClose();
+		this->set_editor_text({});
+	}
+
+	// 원본 _body_for_drag(document_page.py:969~976). 1) 편집기에 연결된 카드면 편집기 평문
+	// (더티 여부를 보지 않는다) 2) 프로젝션 본문 3) 저장소 조회 4) 빈 문자열.
+	// 1) 이 더티 버퍼를 실제로 돌려주게 만드는 편집기 쪽 반쪽은 W6 다(PLAN-W6-0011).
+	std::string body_for_drag_(const std::string& _sCardId)
+	{
+		if (sDraftId && sCurrentCardId && *sCurrentCardId == _sCardId)
+		{
+			return(this->editor_text());
+		}
+		const std::optional<std::size_t> nRow = Projection->RowForCard(_sCardId);
+		const domain::S_CARD* pCard = nRow ? Projection->CardAt(*nRow) : nullptr;
+		if (pCard) { return(pCard->sBody); }
+		domain::S_CARD Card;
+		if (pRepositories->GetCard(_sCardId, &Card) != storage::E_REPO_RESULT::Ok)
+		{
+			return(std::string{});
+		}
+		return(Card.sBody);
+	}
+
 	bool synchronize_editor(domain::E_CAPTURE_OPERATION_SOURCE _eSource)
 	{
 		if (bSynchronizing || bCleaned) { return(true); }
@@ -387,6 +424,24 @@ bool C_DOCUMENT_PAGE::Init(
 	// (sDraftId 와 sCurrentCardId 가 함께 서고 함께 진다) 세션 유무로 판정한다.
 	State.CardList.SetEditorCardProvider([&State]() -> std::optional<std::string>
 		{ return(State.sDraftId ? State.sCurrentCardId : std::nullopt); });
+	// ---- W4 S4 드래그 앤 드롭 배선 ----
+	// 원본 card_move_requested -> _move_card.
+	State.CardList.SetMoveCardHandler([&State](const std::string& _sCardId,
+		const std::optional<std::string>& _sBeforeCardId)
+		{ State.pOwner->MoveCard(_sCardId, _sBeforeCardId); });
+	// 원본 card_delete_dropped -> _delete_dragged_card.
+	State.CardList.SetDeleteDroppedHandler([&State](const std::string& _sCardId)
+		{ State.pOwner->DeleteDraggedCard(_sCardId); });
+	// 원본 drag_started -> _show_delete_drop_zone(_card_id, token). 첫 인자는 원본 시그니처
+	// 그대로 받아 두고 쓰지 않는다 - 오버레이는 카드마다 달라지지 않는다.
+	State.CardList.SetDragStartedHandler([&State](const std::string&,
+		domain::CardDragSessionToken _nToken) { State.CardList.ArmDeleteZone(_nToken); });
+	// 원본 drag_finished -> _hide_delete_drop_zone(token).
+	State.CardList.SetDragFinishedHandler([&State](domain::CardDragSessionToken)
+		{ State.CardList.DisarmDeleteZone(); });
+	// 원본 set_drag_body_provider(self._body_for_drag)(document_page.py:209).
+	State.CardList.SetDragBodyProvider([&State](const std::string& _sCardId)
+		{ return(State.body_for_drag_(_sCardId)); });
 	State.hHistory = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
 		WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
 		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_HISTORY), _hInstance, nullptr);
@@ -458,6 +513,24 @@ bool C_DOCUMENT_PAGE::Init(
 void C_DOCUMENT_PAGE::SetChangeNotifier(ChangeNotifier _Notifier)
 {
 	m_pState->Notifier = std::move(_Notifier);
+}
+
+void C_DOCUMENT_PAGE::SetDragDeletePrompt(DragDeletePrompt _Prompt)
+{
+	m_pState->DragDelete = std::move(_Prompt);
+}
+
+void C_DOCUMENT_PAGE::SetContextMenuExecutor(std::function<UINT(HMENU, POINT)> _Executor)
+{
+	// 컨트롤로 그대로 넘긴다 - 페이지는 스스로 설치하지 않고 셸만 이 함수를 부른다.
+	m_pState->CardList.SetContextMenuExecutor(std::move(_Executor));
+}
+
+void C_DOCUMENT_PAGE::SetDragRunner(
+	std::function<HRESULT(IDataObject*, IDropSource*, DWORD, DWORD*)> _Runner)
+{
+	// 메뉴 실행기와 같은 전달자다 - 페이지는 스스로 설치하지 않는다(fix1).
+	m_pState->CardList.SetDragRunner(std::move(_Runner));
 }
 
 void C_DOCUMENT_PAGE::SetRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -692,6 +765,105 @@ bool C_DOCUMENT_PAGE::DeleteCards(const std::vector<std::string>& _CardIds)
 	State.refresh_cards();
 	State.notify_change();
 	// 원본은 삭제 뒤 포커스를 옮기지 않는다.
+	return(true);
+}
+
+bool C_DOCUMENT_PAGE::MoveCard(const std::string& _sCardId,
+	const std::optional<std::string>& _sBeforeCardId)
+{
+	// 원본 _move_card(document_page.py:919~932).
+	auto& State = *m_pState;
+	if (State.bCleaned) { return(false); }
+	// 원본 _can_run_destructive_command -> can_leave_editor(protect_now=True) 다.
+	if (!this->Protect()) { return(false); }
+	if (this->CanLeave() == app::E_LEAVE_RESULT::Denied) { return(false); }
+	domain::S_CARD Moved;
+	// 낙관적 동시성은 서비스 안에서 트랜잭션과 함께 돈다 - 드래그 시점 리비전을 넘기지
+	// 않는다(삭제 경로와 다른 자리다). before == card 도 서비스가 무동작으로 접는다.
+	if (State.pCardService->MoveCard(_sCardId, _sBeforeCardId, &Moved) !=
+		app::E_CARD_SERVICE_RESULT::Ok)
+	{
+		// CEILING: 오류 대화상자("카드 이동 실패")는 W7 주변 UI(error reporter seam) 몫이다 -
+		// 원본처럼 목록을 다시 읽지 않고 false 만 돌린다.
+		return(false);
+	}
+	State.refresh_cards();
+	State.notify_change();
+	return(true);
+}
+
+bool C_DOCUMENT_PAGE::DeleteDraggedCard(const std::string& _sCardId)
+{
+	// 원본 _delete_dragged_card(document_page.py:978~1036).
+	auto& State = *m_pState;
+	if (State.bCleaned) { return(false); }
+	// 1) 기대 리비전은 드래그 시작 시점의 값이다. 없으면 지우지 않고 끝난다.
+	// CEILING: 오류 보고("카드 삭제 실패" / "드래그 시작 시점의 카드 리비전을 확인할 수
+	// 없습니다.")는 W7 주변 UI(error reporter seam) 몫이다 - 여기서는 false 만 돌린다.
+	std::optional<std::string> sExpectedRevisionId = State.CardList.ActiveDragRevision(_sCardId);
+	if (!sExpectedRevisionId) { return(false); }
+	// 2) 편집기 세션이 이 카드에 연결돼 있으면 그 초안이 discard 대상이다.
+	const bool bConnected =
+		State.sDraftId && State.sCurrentCardId && *State.sCurrentCardId == _sCardId;
+	const std::optional<std::string> sDiscardDraftId =
+		bConnected ? State.sDraftId : std::optional<std::string>{};
+	bool bDirty = false;
+	if (bConnected)
+	{
+		const auto Session = State.pDraftCoordinator->Session(*State.sDraftId);
+		bDirty = Session && Session->bDirty;
+	}
+	if (!bConnected)
+	{
+		// 3) 연결돼 있지 않으면 편집 중인 초안을 먼저 보호한다. 실패하면 지우지 않는다.
+		if (!this->Protect()) { return(false); }
+	}
+	else if (bDirty)
+	{
+		// 4) 연결 + 더티면 3지 선택이다. 연결 + 깨끗하면 프롬프트 없이 바로 지운다.
+		E_DRAG_DELETE_CHOICE eChoice = E_DRAG_DELETE_CHOICE::Cancel;
+		if (State.DragDelete) { eChoice = State.DragDelete(State.hEditor); }
+		else
+		{
+			// CEILING: 원본 세 버튼 라벨(저장 후 삭제 / 그대로 삭제 / 취소)은 comctl32 v6
+			// TaskDialog 가 있어야 하고 이 앱은 v6 매니페스트를 요구하지 않는다 - CanLeave 의
+			// 기본 대화상자와 같은 MB_YESNOCANCEL 근사이며 기본 단추는 취소다.
+			const int nChoice = ::MessageBoxW(State.hEditor,
+				L"저장하지 않은 변경이 있습니다.\n"
+				L"예: 저장 후 삭제 / 아니요: 그대로 삭제 / 취소: 삭제하지 않음",
+				L"편집 중인 카드 삭제",
+				MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
+			eChoice = nChoice == IDYES ? E_DRAG_DELETE_CHOICE::Save :
+				nChoice == IDNO ? E_DRAG_DELETE_CHOICE::Discard : E_DRAG_DELETE_CHOICE::Cancel;
+		}
+		if (eChoice == E_DRAG_DELETE_CHOICE::Cancel) { return(false); }
+		if (eChoice == E_DRAG_DELETE_CHOICE::Save)
+		{
+			if (!this->Save()) { return(false); }
+			// 저장 뒤에는 리비전이 올라간다 - 기대 리비전을 다시 읽는다.
+			domain::S_CARD Saved;
+			if (State.pRepositories->GetCard(_sCardId, &Saved) != storage::E_REPO_RESULT::Ok ||
+				Saved.nDeletedAtUs) { return(false); }
+			sExpectedRevisionId = Saved.sCurrentRevisionId;
+		}
+	}
+	// 5) soft delete. 초안은 discard 로 넘어가므로 아래 해제 경로가 다시 보호하지 않는다.
+	domain::S_CARD Deleted;
+	if (State.pCardService->SoftDelete(_sCardId, sExpectedRevisionId, false, sDiscardDraftId,
+		&Deleted) != app::E_CARD_SERVICE_RESULT::Ok)
+	{
+		// CEILING: CAS 거부("카드 삭제 거부")와 그 밖의 실패("카드 삭제 실패")를 나누어
+		// 알리는 자리는 W7 주변 UI 몫이다.
+		return(false);
+	}
+	// 6) 연결돼 있었으면 삭제된 카드의 세션을 놓고 편집면으로 포커스를 옮긴다.
+	if (bConnected)
+	{
+		State.discard_session_for_deleted_card_();
+		::SetFocus(State.hEditor);
+	}
+	State.refresh_cards();
+	State.notify_change();
 	return(true);
 }
 

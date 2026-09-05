@@ -47,6 +47,25 @@ namespace
 			Display.sTimeZone = sValue;
 		}
 		_Page.SetDisplaySettings(Display);
+		// 카드 컨텍스트 메뉴의 진짜 실행기는 셸이 건다 - 컨트롤 기본값은 비어 있어야
+		// 시험 프로세스의 우클릭이 모달 팝업을 열지 않는다(W4 S4 spec §3.4.6).
+		// TPM_RETURNCMD 는 WM_COMMAND 라우팅을 아예 건너뛰고, 목록이 좌 press 에서 잡은
+		// 캡처가 살아 있으면 팝업이 즉시 닫히므로 먼저 캡처를 놓는다.
+		_Page.SetContextMenuExecutor([](HMENU _hMenu, POINT _Screen) -> UINT
+			{
+				::ReleaseCapture();
+				// 소유 창을 목록 HWND 로 줄 수 없다 - bind_card_list 는 Init 앞에서 돌아
+				// 그 시점에 목록 창이 아직 없고, 실행기 시그니처도 (HMENU, POINT) 고정이다.
+				return(static_cast<UINT>(::TrackPopupMenu(_hMenu,
+					TPM_RETURNCMD | TPM_RIGHTBUTTON, _Screen.x, _Screen.y, 0,
+					::GetActiveWindow(), nullptr)));
+			});
+		// 진짜 드래그 실행기도 같은 이유로 셸이 건다(fix1). 컨트롤 기본값이 비어 있어야
+		// 읽기 전용 S1~S3 시험이 실제 모달 드래그 루프에 들지 않는다 - 시험 프로세스는
+		// D2D 스왑체인이 만든 OLE 아파트를 갖게 되므로 기본값이 진짜 러너면 그 루프의
+		// 종료가 데스크톱 상태(물리 좌버튼·커서 위치)에 좌우된다.
+		_Page.SetDragRunner([](IDataObject* _pData, IDropSource* _pSource, DWORD _nOkEffects,
+			DWORD* _pEffect) { return(::DoDragDrop(_pData, _pSource, _nOkEffects, _pEffect)); });
 	}
 }
 

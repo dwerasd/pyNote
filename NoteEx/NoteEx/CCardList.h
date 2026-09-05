@@ -9,6 +9,10 @@
 #include <atlapp.h>
 #include <atlwin.h>
 
+// 드래그 앤 드롭 seam 의 인자 타입이다(S4). atlbase.h 가 ole2.h 를 이미 읽지만 이 헤더가
+// 스스로 요구하는 선언이므로 명시한다.
+#include <ole2.h>
+
 #include <D2DWrapp/D2DDef.h>
 #include <D2DWrapp/D2DSwapTarget.h>
 #include <D2DWrapp/D2DText.h>
@@ -39,6 +43,11 @@ namespace pynote::core::domain
 	// 휠 탐색 상태 기계도 같은 이유로 CCardList.cpp 에서만 읽는다(W2-R6 완성분을 소비만 한다).
 	class C_CARD_WHEEL_BROWSE;
 	struct S_CARD_WHEEL_TIMER_COMMAND;
+	// 드래그 세션 등록소(W2-R5)도 같은 이유로 .cpp 에서만 읽는다. 아래 두 별칭은 core 헤더의
+	// 정의와 글자 그대로 같은 재선언이라(별칭 중복 선언은 적법하다) 타입이 갈리지 않는다.
+	class C_CARD_DRAG_SESSION_REGISTRY;
+	using CardDragSourceIdentity = std::uintptr_t;
+	using CardDragSessionToken = std::uint64_t;
 }
 
 // 원본 CardDelegate 의 클래스 상수를 그대로 옮긴 것이다(card_delegate.py:23~27, :70).
@@ -48,6 +57,15 @@ inline constexpr int CARD_CONTENT_HORIZONTAL_MARGIN_DIP = 14;
 inline constexpr int CARD_CONTENT_VERTICAL_MARGIN_DIP = 10;
 inline constexpr int CARD_AUXILIARY_ROW_PADDING_DIP = 4;
 inline constexpr float CARD_CORNER_RADIUS_DIP = 6.0f;
+
+// 하단 삭제 오버레이의 원본 상수다(_position_delete_drop_zone document_page.py:953~967,
+// CardDeleteDropZone card_stream.py:598~614). 좌우 예약 96 은 원본의 panel_width - 96 이다.
+inline constexpr int CARD_DELETE_ZONE_MAX_WIDTH_DIP = 280;
+inline constexpr int CARD_DELETE_ZONE_HEIGHT_DIP = 56;
+inline constexpr int CARD_DELETE_ZONE_BOTTOM_GAP_DIP = 16;
+inline constexpr int CARD_DELETE_ZONE_SIDE_RESERVE_DIP = 96;
+inline constexpr int CARD_DELETE_ZONE_LABEL_MARGIN_DIP = 8;
+inline constexpr float CARD_DELETE_ZONE_CORNER_RADIUS_DIP = 8.0f;
 
 // QRect 와 같은 닫힌 정수 구간이다(Right = Left + Width - 1). Win32 RECT 의 열린 구간과
 // 섞으면 1 DIP 오차가 조용히 생기므로 별도 타입으로 못박는다 - 파이썬 단언이 QRect
@@ -164,6 +182,11 @@ struct S_CARD_LIST_FRAME
 	std::size_t nLayoutCount{ 0 };
 	bool bPresented{ false };
 	std::vector<S_CARD_LIST_ROW_FRAME> Rows;
+	// 삭제 오버레이는 목록 프레임 안에서 그린다(새 HWND·스왑 타깃 없음, spec §3.3.1).
+	// 기하 단언이 논리로 닫히도록 그리기에 쓴 값을 그대로 싣는다.
+	bool bDeleteZoneVisible{ false };
+	S_DIP_RECT DeleteZoneRect{};
+	d2d::Color nDeleteZoneColor{ 0 };
 };
 
 // Qt QAbstractItemView 의 상태 기계 중 S2 가 쓰는 세 가지다. Dragging 은 S2 에서
@@ -209,6 +232,25 @@ struct S_CARD_DRAG_SNAPSHOT
 	POINT PressPoint{};
 };
 
+// 드래그가 실제로 도는 동안의 상태다. press 상태와 별개 멤버인 것이 계약이다 -
+// DoDragDrop 이 자기 캡처를 잡으면 WM_CAPTURECHANGED 가 press 상태를 지우는데, 원본은
+// snapshot 을 finally 에서만 지우고 드롭 시점 판정이 전부 이 값을 읽는다(spec §3.1.7).
+struct S_CARD_DRAG_SESSION
+{
+	pynote::core::domain::CardDragSessionToken nToken{ 0 };
+	std::string sCardId;
+	std::optional<std::string> sRevisionId{};
+	// 원본 drag_executed - 실행되면 press 소비를 되돌리지 않는다(반환된 HRESULT 는 전부 실행).
+	bool bExecuted{ false };
+};
+
+// OLE 드롭에는 "누가 끌었나" 가 실리지 않는다 - 원본 event.source() is self 에 대응물이
+// 없으므로 데이터 개체가 자기 원본을 밝히고 드롭 대상이 자기 것과 대조한다(제품 경로).
+struct __declspec(uuid("6C1D2E44-9E4A-4A3B-9E2C-2B0E1F5A7C31")) I_CARD_DRAG_SOURCE : public IUnknown
+{
+	virtual pynote::core::domain::CardDragSourceIdentity STDMETHODCALLTYPE SourceIdentity() = 0;
+};
+
 // QApplication.startDragDistance() 실측값(오라클 [ENV]). SM_CXDRAG 가 아니다.
 inline constexpr int CARD_DRAG_DISTANCE_DIP = 10;
 // QApplication.keyboardInputInterval() 기본값(타입어헤드 검색 재시작 간격).
@@ -219,6 +261,10 @@ inline constexpr UINT CARD_LIST_DEFERRED_MESSAGE = WM_APP + 0x41;
 // 휠 정숙 열기 타이머의 id 다. 이 컨트롤에는 다른 타이머가 없으므로 같은 id 를 다시 걸면
 // 이전 타이머가 대체되고, 그것이 원본 QTimer.start() 재시작과 같은 관측을 만든다.
 inline constexpr UINT_PTR CARD_LIST_WHEEL_TIMER_ID = 1;
+
+// 드래그 등록소·원본 등록·COM 개체 수명은 core 헤더와 COM 스마트 포인터를 요구하므로
+// .cpp 의 정의로 감춘다(이 헤더는 ATL/WTL 과 함께 #undef CreateEvent 앞에서 읽힌다).
+struct S_CARD_DRAG_INTERNAL;
 
 class C_CARD_LIST final : public CWindowImpl<C_CARD_LIST>
 {
@@ -235,6 +281,24 @@ public:
 	// 원본 self.editor.card_id 는 열기 실패 뒤에 읽힌다 - 미리 받아 두지 않고 그 시점에 부른다.
 	using EditorCardProvider = std::function<std::optional<std::string>()>;
 
+	// ---- 드래그 앤 드롭·컨텍스트 메뉴(S4) ----
+	// 원본 QDrag.exec 자리. **기본값 없음(실행됨·취소 의미); 셸이 ::DoDragDrop 을 설치한다.**
+	// pEffect 는 호출 전에 "제안 동작"(원본 drag.exec 의 두 번째 인자 = Copy)으로 채워 넣는다.
+	using DragRunner = std::function<HRESULT(IDataObject*, IDropSource*, DWORD, DWORD*)>;
+	// 원본 _execute_context_menu 자리. 고른 명령 id 를 돌리고 취소는 0 이다.
+	// 컨트롤 기본값은 비어 있다 - 진짜 TrackPopupMenu 는 셸(CMain bind_card_list)이 건다.
+	using MenuExecutor = std::function<UINT(HMENU, POINT)>;
+	// EndDraw 직전의 장치 컨텍스트를 넘겨 주는 관측 seam(기본 미설치).
+	using FrameCaptureHook = std::function<void(ID2D1DeviceContext*)>;
+	// 원본 set_drag_body_provider. 미설치면 프로젝션의 확정 본문을 싣는다.
+	using DragBodyProvider = std::function<std::string(const std::string&)>;
+	// 원본 card_move_requested / card_delete_dropped / drag_started / drag_finished.
+	using MoveCardHandler = std::function<void(const std::string&, const std::optional<std::string>&)>;
+	using DeleteDroppedHandler = std::function<void(const std::string&)>;
+	using DragStartedHandler =
+		std::function<void(const std::string&, pynote::core::domain::CardDragSessionToken)>;
+	using DragFinishedHandler = std::function<void(pynote::core::domain::CardDragSessionToken)>;
+
 	C_CARD_LIST();
 	~C_CARD_LIST();
 	C_CARD_LIST(const C_CARD_LIST&) = delete;
@@ -248,6 +312,14 @@ public:
 	void SetDeleteHandler(DeleteHandler _Handler);
 	void SetBrowseCardHandler(BrowseCardHandler _Handler);
 	void SetEditorCardProvider(EditorCardProvider _Provider);
+	void SetDragRunner(DragRunner _Runner);
+	void SetContextMenuExecutor(MenuExecutor _Executor);
+	void SetFrameCaptureHook(FrameCaptureHook _Hook);
+	void SetDragBodyProvider(DragBodyProvider _Provider);
+	void SetMoveCardHandler(MoveCardHandler _Handler);
+	void SetDeleteDroppedHandler(DeleteDroppedHandler _Handler);
+	void SetDragStartedHandler(DragStartedHandler _Handler);
+	void SetDragFinishedHandler(DragFinishedHandler _Handler);
 	// 디바이스·브러시 캐시·텍스트 엔진은 CApplication 소유다. 붙지 않으면 그리지 않고
 	// 나머지(행·LB 메시지·Enter·스크롤 산술)는 그대로 동작한다.
 	void AttachRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -283,6 +355,29 @@ public:
 	// 원본 reveal_card(document_page.py:286~296)의 목록 쪽 절반 - 취소 뒤 SetCurrentRow 다.
 	void RevealRow(std::size_t _nRow);
 
+	// ---- 드래그 앤 드롭(S4). 정책(토큰 발급·4중 Validate·정렬 모드 술어)은 core 소유다. ----
+	// 원본 active_drag_revision(card_stream.py:205~210) - 요청 카드가 현재 세션의 카드일 때만
+	// press 시점 리비전을 돌린다. 네이티브 출처는 press 스냅샷이 아니라 세션 기록이다(spec §3.3.5).
+	std::optional<std::string> ActiveDragRevision(const std::string& _sCardId) const;
+	std::optional<pynote::core::domain::CardDragSessionToken> ActiveDragToken() const;
+	// 원본 zone.arm(token) / disarm() + show()/hide(). 무장 토큰이 곧 표시 여부다.
+	void ArmDeleteZone(pynote::core::domain::CardDragSessionToken _nToken);
+	void DisarmDeleteZone();
+	std::optional<pynote::core::domain::CardDragSessionToken> ArmedDeleteToken() const;
+	// 그린 프레임과 무관하게 읽는 오버레이 기하(원본 _position_delete_drop_zone 축자 이식).
+	S_DIP_RECT DeleteZoneRectDip() const;
+	// 원본 model.mimeData((index,)) 자리 - 지금의 payload 상태(토큰·본문)로 데이터 개체를
+	// 만든다. 호출자가 Release 하며, 정리 뒤 다시 만들면 토큰이 0 이다(spec §3.1.8).
+	IDataObject* CreateDragDataObject(const std::string& _sCardId) const;
+	// 시험이 모달 루프 없이 DragEnter/DragOver/Drop 을 직접 몰기 위한 자리다(제품 경로).
+	IDropTarget* DropTargetForTest() const noexcept;
+	// RegisterDragDrop 의 마지막 결과와 현재 등록 보유 여부. 실패는 치명적이지 않다.
+	HRESULT DropRegistrationResult() const noexcept;
+	bool HasDropRegistration() const noexcept;
+	// 원본 Qt 줄 스크롤 양(spec §3.1.12): wheelScrollLines x (-delta/120) x 행 높이를
+	// 절사하고 한 페이지(뷰포트 높이)로 묶는다. 반환값은 오프셋 증분이다.
+	int ScrollLinesForWheel(int _nDelta) const;
+
 	std::size_t RowCount() const noexcept;
 	int LineSpacingDip() const;
 	int RowHeightDip() const;
@@ -302,6 +397,7 @@ public:
 	std::wstring TimeLabel(std::int64_t _nEpochUs) const;
 
 	BEGIN_MSG_MAP(C_CARD_LIST)
+		MESSAGE_HANDLER(WM_CREATE, OnCreate)
 		MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
 		MESSAGE_HANDLER(WM_PAINT, OnPaint)
 		MESSAGE_HANDLER(WM_SIZE, OnSize)
@@ -315,6 +411,9 @@ public:
 		MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
 		MESSAGE_HANDLER(WM_RBUTTONDOWN, OnRButtonDown)
 		MESSAGE_HANDLER(WM_RBUTTONUP, OnRButtonUp)
+		// 우버튼 릴리스를 더는 삼키지 않는다 - DefWindowProc 이 WM_CONTEXTMENU 를 합성하고
+		// 키보드 컨텍스트 키(VK_APPS·Shift+F10)도 같은 자리로 들어온다(spec §3.4.1).
+		MESSAGE_HANDLER(WM_CONTEXTMENU, OnContextMenu)
 		MESSAGE_HANDLER(WM_CAPTURECHANGED, OnCaptureChanged)
 		// WM_MOUSEHWHEEL 은 처리하지 않는다 - DefWindowProc 이 부모로 올려 보내는 것이
 		// 원본의 "수평 각은 accept 하지 않는다"(오라클 P9)와 같은 관측이다.
@@ -342,6 +441,7 @@ public:
 		MESSAGE_HANDLER(LB_SETTOPINDEX, OnListSetTopIndex)
 	END_MSG_MAP()
 
+	LRESULT OnCreate(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnEraseBkgnd(UINT, WPARAM, LPARAM, BOOL&) { return(1); }
 	LRESULT OnPaint(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnSize(UINT, WPARAM, LPARAM, BOOL&);
@@ -352,7 +452,8 @@ public:
 	LRESULT OnLButtonDown(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnLButtonUp(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnRButtonDown(UINT, WPARAM, LPARAM, BOOL&);
-	LRESULT OnRButtonUp(UINT, WPARAM, LPARAM, BOOL&) { return(0); }
+	LRESULT OnRButtonUp(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnContextMenu(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnMouseWheel(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&);
@@ -400,6 +501,28 @@ private:
 	void keyboard_search_(wchar_t _Char);
 	bool prefix_match_(std::size_t _nRow, const std::wstring& _sPrefix) const;
 	void reset_press_state_();
+	// ---- 드래그 앤 드롭 내부(S4) ----
+	pynote::core::domain::CardDragSourceIdentity source_identity_() const noexcept;
+	void ensure_drop_registration_();
+	// 원본 startDrag(card_stream.py:439~488)의 순서를 그대로 도는 자리다.
+	void begin_drag_();
+	// 원본 finally 의 세 블록. 호출 자리는 정확히 둘(러너 반환 직후·OnDestroy)이고 멱등이다.
+	void finish_drag_session_();
+	std::string drag_body_(const std::string& _sCardId) const;
+	// 원본 _drop_before_card_id(card_stream.py:548~560) - 행 반쪽 판정이다.
+	std::optional<std::string> drop_before_card_(POINT _PointDip) const;
+	bool zone_hit_(POINT _PointDip) const;
+	POINT client_point_from_screen_(POINTL _Screen) const;
+	// DragEnter/DragOver 의 여섯 술어(정렬·원본·payload·세션·토큰·카드/리비전).
+	bool accepts_session_payload_(IDataObject* _pData) const;
+	bool accepts_row_drag_(IDataObject* _pData) const;
+	bool accepts_zone_drag_(IDataObject* _pData) const;
+	DWORD handle_drag_over_(IDataObject* _pData, POINTL _Screen) const;
+	DWORD handle_drop_(IDataObject* _pData, POINTL _Screen);
+	void draw_delete_zone_(ID2D1DeviceContext* _pDc);
+	// 원본 _build_context_menu / _execute_context_menu(card_stream.py:499~527, :495~497).
+	void show_context_menu_(POINT _ClientDip, POINT _Screen);
+	bool copy_body_to_clipboard_(const std::string& _sBody) const;
 	// core 스케줄러 포트의 구현. Arm 은 SetTimer, Cancel 은 KillTimer 다.
 	void schedule_wheel_timer_(const pynote::core::domain::S_CARD_WHEEL_TIMER_COMMAND& _Command);
 	bool render_();
@@ -462,4 +585,23 @@ private:
 	std::uint64_t m_nWheelTimerGeneration{ 0 };
 	BrowseCardHandler m_BrowseCard;
 	EditorCardProvider m_EditorCard;
+
+	// ---- 드래그 앤 드롭·컨텍스트 메뉴(S4) ----
+	// press 상태와 분리된 세션이다. reset_press_state_ 는 이것을 건드리지 않는다(spec §3.1.7).
+	std::optional<S_CARD_DRAG_SESSION> m_DragSession{};
+	std::optional<pynote::core::domain::CardDragSessionToken> m_nArmedDeleteToken{};
+	// 원본 CardListModel 의 _drag_token / _drag_body 다(card_model.py:188~197). 정리는
+	// 토큰 0 · 본문 없음이며, 그 뒤 다시 만든 payload 는 확정 본문과 토큰 0 을 싣는다.
+	pynote::core::domain::CardDragSessionToken m_nDragPayloadToken{ 0 };
+	std::optional<std::string> m_sDragPayloadBody{};
+	// 등록소·원본 등록·COM 개체는 core 와 COM 헤더를 요구하므로 .cpp 정의로 감춘다.
+	std::unique_ptr<S_CARD_DRAG_INTERNAL> m_pDragInternal;
+	DragRunner m_DragRunner;
+	MenuExecutor m_MenuExecutor;
+	FrameCaptureHook m_FrameCapture;
+	DragBodyProvider m_DragBody;
+	MoveCardHandler m_MoveCard;
+	DeleteDroppedHandler m_DeleteDropped;
+	DragStartedHandler m_DragStarted;
+	DragFinishedHandler m_DragFinished;
 };
