@@ -27,6 +27,9 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <optional>
+#include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -79,6 +82,31 @@ namespace
 		return(std::chrono::duration_cast<std::chrono::microseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count());
 	}
+
+	// 부록 A-1 순서 그대로다(index = enum order) - S5 정렬 콤보의 유일한 사실 출처.
+	int sort_combo_index(domain::E_CARD_LIST_SORT_MODE _eMode) noexcept
+	{
+		switch (_eMode)
+		{
+		case domain::E_CARD_LIST_SORT_MODE::Position: return(1);
+		case domain::E_CARD_LIST_SORT_MODE::Capture: return(2);
+		default: return(0);
+		}
+	}
+
+	// 부록 A-2 순서 그대로다(index 0 = 필터 없음) - S5 출처 필터 콤보의 유일한 사실 출처.
+	std::optional<domain::E_CARD_SOURCE> source_filter_for_index(int _nIndex) noexcept
+	{
+		switch (_nIndex)
+		{
+		case 1: return(domain::E_CARD_SOURCE::Typing);
+		case 2: return(domain::E_CARD_SOURCE::Paste);
+		case 3: return(domain::E_CARD_SOURCE::Mixed);
+		case 4: return(domain::E_CARD_SOURCE::Import);
+		case 5: return(domain::E_CARD_SOURCE::Restore);
+		default: return(std::nullopt);
+		}
+	}
 }
 
 struct C_DOCUMENT_PAGE::S_STATE
@@ -91,6 +119,11 @@ struct C_DOCUMENT_PAGE::S_STATE
 	HWND hFind{};
 	HWND hReplace{};
 	HWND hHistory{};
+	// S5 정렬/출처 필터/휴지통 스트립과 카드 목록 소유 tooltips 창(spec §3.1.1/§3.2.8).
+	HWND hSortCombo{};
+	HWND hSourceFilter{};
+	HWND hTrashButton{};
+	HWND hTooltip{};
 	HMODULE hRichEdit{};
 	storage::C_DATABASE* pDatabase{};
 	storage::C_REPOSITORIES* pRepositories{};
@@ -108,6 +141,10 @@ struct C_DOCUMENT_PAGE::S_STATE
 	C_DOCUMENT_PAGE::LeavePrompt LeavePrompt;
 	C_DOCUMENT_PAGE::DragDeletePrompt DragDelete;
 	C_DOCUMENT_PAGE::ChangeNotifier Notifier;
+	// S5: 필터의 "현재 선택값" 은 core 가 아니라 페이지가 든다(선례 bMultiSelectionEnabled,
+	// spec §3.1.7) - core 는 값을 소유할 getter 를 얻지 않는다. 비영속(canon §2-6/native §2-7):
+	// S_DOCUMENT_UI_STATE 에 열이 없고 재오픈은 항상 "모든 출처" 로 보인다.
+	std::optional<domain::E_CARD_SOURCE> eSourceFilter{};
 	// 보기 메뉴로 켠 다중 선택. Init 이 프로젝션을 만든 직후 다시 건다(새 창도 영속값에서 시작).
 	bool bMultiSelectionEnabled{ false };
 	bool bSynchronizing{ false };
@@ -166,11 +203,37 @@ struct C_DOCUMENT_PAGE::S_STATE
 		std::vector<domain::S_CARD> Cards;
 		if (pCardService->ListActiveCards(sDocumentId, this->service_sort(), &Cards) !=
 			app::E_CARD_SERVICE_RESULT::Ok) { return(false); }
+		// S5: 원본 refresh() 의 두 메타 캐시를 같은 순서로 재계산한다(document_page.py:
+		// 238~262) - 방금 읽은 카드 목록 기준, ListActiveCards 성공 뒤·CancelPendingBrowse
+		// 앞이다(spec §3.4.2). 저장소 호출은 여기 한 곳뿐이고 그리기 경로에는 닿지 않는다
+		// (PLAN-W4-0047/0061 의 1만 장 타이밍 게이트 보호). list_drafts 기반 dirty 재구축
+		// 셋째 단계는 이식하지 않는다 - 재진입은 W6 편집기 결선(spec §3.4.2 선언된 이탈).
+		std::unordered_map<std::string, int> RevisionCounts;
+		std::set<std::string> ReconstructionUnavailable;
+		for (const domain::S_CARD& Card : Cards)
+		{
+			std::vector<domain::S_CARD_REVISION> Revisions;
+			pRepositories->ListRevisions(Card.sId, &Revisions);
+			RevisionCounts[Card.sId] = static_cast<int>(Revisions.size());
+			bool bAvailable = true;
+			pRepositories->OperationReconstructionAvailable(Card.sId, &bAvailable);
+			if (!bAvailable) { ReconstructionUnavailable.insert(Card.sId); }
+		}
+		// CEILING: 10000장 갱신 = SQL 20000문(ListRevisions 가 본문까지 적재) — 파이썬
+		// 동일, 상향 경로 = COUNT 전용 저장소 API(core 재개방, 별건)
+		// CEILING: 결정 5 의 리셋→TakeDeltas 소비 전환은 F-04 가 트리거 자리를 대체하면서
+		// 최적화 잔여로 남았다 — CAP-NC-010 은 이미 §3.4.2·§3.4.4 로 닫히므로 이 잔여는
+		// 성능 개선 별건(W4 aggregate 이연, 이연검증대장 §3-9 S5 항 기록)
+		// 조용하다 - 자체 무효화가 없고 바로 뒤따르는 리셋에 실린다(원본
+		// set_cards(cards, revision_counts=...) 와 같은 접힘).
+		CardList.SetRevisionCounts(std::move(RevisionCounts));
 		// 원본은 modelAboutToBeReset 에서 취소한다 - 읽기가 성공한 뒤, 리셋 바로 앞이다.
 		// 읽기가 실패하면 원본은 예외로 빠져나가 리셋에 닿지 않으므로 여기서도 취소하지 않는다.
 		CardList.CancelPendingBrowse();
 		Projection->SetCards(Cards);
 		CardList.OnProjectionChanged();
+		// 리셋 뒤 - 원본의 넷째, 별도 set_reconstruction_unavailable_ids 호출과 같다.
+		CardList.SetReconstructionUnavailableIds(std::move(ReconstructionUnavailable));
 		return(true);
 	}
 
@@ -309,7 +372,18 @@ struct C_DOCUMENT_PAGE::S_STATE
 		const auto Updated = pDraftCoordinator->UpdateSession(*sDraftId, sText, nCursor,
 			_eSource == domain::E_CAPTURE_OPERATION_SOURCE::Paste);
 		if (Updated.eOutcome != app::E_DRAFT_OUTCOME::Ok) { return(false); }
-		if (sCurrentCardId) { Projection->SetCardDirty(*sCurrentCardId, Updated.Session && Updated.Session->bDirty); }
+		if (sCurrentCardId)
+		{
+			// S5: 값이 실제로 바뀔 때만 통지한다 - synchronize_editor 는 카드가 더티인 동안
+			// 매 키 입력마다 같은 true 를 재도장하므로, 가드가 없으면 매 키 입력마다 로그·
+			// 재도장이 뜬다(spec §3.4.4, "이 가드는 선택이 아니다"). core 자체 가드
+			// (SetCardDirty 의 if(before==dirty)return;) 는 *값*만 지키지 이 통지를 대신
+			// 못 낸다.
+			const bool bDirty = Updated.Session && Updated.Session->bDirty;
+			const bool bWasDirty = Projection->IsCardDirty(*sCurrentCardId);
+			Projection->SetCardDirty(*sCurrentCardId, bDirty);
+			if (bWasDirty != bDirty) { CardList.NotifyCardDirtyChanged(*sCurrentCardId); }
+		}
 		return(true);
 	}
 
@@ -331,6 +405,51 @@ struct C_DOCUMENT_PAGE::S_STATE
 			const LRESULT nResult = ::DefSubclassProc(_hWnd, _uMessage, _wParam, _lParam);
 			pState->synchronize_editor(domain::E_CAPTURE_OPERATION_SOURCE::Typing);
 			return(nResult);
+		}
+		return(::DefSubclassProc(_hWnd, _uMessage, _wParam, _lParam));
+	}
+
+	// hListHost 는 CMain 이 만들고 여러 문서를 거쳐 재사용하는 장수 pane 이다 - 페이지가
+	// 만들지도 부수지도 않으므로 WM_NCDESTROY 자동 해제(EditorSubclass 의 방식)를 쓸 수
+	// 없다. 제거는 Cleanup() 이 명시로 한다(spec §3.1.5, ratified departure). 서브클래스 id
+	// 2 다(EditorSubclass 가 이미 id 1 을 hEditor 에 쓴다). 자식 컨트롤의 WM_COMMAND 만
+	// 가로채고 나머지는 그대로 DefSubclassProc 로 흘려보낸다.
+	static LRESULT CALLBACK ListHostSubclass(
+		HWND _hWnd, UINT _uMessage, WPARAM _wParam, LPARAM _lParam,
+		UINT_PTR, DWORD_PTR _nReference)
+	{
+		auto* pState = reinterpret_cast<S_STATE*>(_nReference);
+		if (pState && _uMessage == WM_COMMAND)
+		{
+			const UINT nId = LOWORD(_wParam);
+			const UINT nCode = HIWORD(_wParam);
+			if (nId == IDC_DOCUMENT_SORT_COMBO && nCode == CBN_SELCHANGE)
+			{
+				static constexpr domain::E_CARD_LIST_SORT_MODE Modes[] = {
+					domain::E_CARD_LIST_SORT_MODE::Recency,
+					domain::E_CARD_LIST_SORT_MODE::Position,
+					domain::E_CARD_LIST_SORT_MODE::Capture };
+				const int nIndex = static_cast<int>(
+					::SendMessageW(pState->hSortCombo, CB_GETCURSEL, 0, 0));
+				if (nIndex >= 0 && static_cast<std::size_t>(nIndex) < std::size(Modes))
+				{
+					pState->pOwner->SetSortMode(Modes[nIndex]);
+				}
+				return(0);
+			}
+			if (nId == IDC_DOCUMENT_SOURCE_FILTER && nCode == CBN_SELCHANGE)
+			{
+				const int nIndex = static_cast<int>(
+					::SendMessageW(pState->hSourceFilter, CB_GETCURSEL, 0, 0));
+				pState->pOwner->SetSourceFilter(source_filter_for_index(nIndex));
+				return(0);
+			}
+			if (nId == IDC_DOCUMENT_TRASH_BUTTON && nCode == BN_CLICKED)
+			{
+				// 지어졌지만 배선되지 않았다 - CEILING: W7 휴지통 대화상자·복원 UI, 지금은
+				// 눌러도 아무 일도 없다(spec §3.1.11).
+				return(0);
+			}
 		}
 		return(::DefSubclassProc(_hWnd, _uMessage, _wParam, _lParam));
 	}
@@ -442,6 +561,22 @@ bool C_DOCUMENT_PAGE::Init(
 	// 원본 set_drag_body_provider(self._body_for_drag)(document_page.py:209).
 	State.CardList.SetDragBodyProvider([&State](const std::string& _sCardId)
 		{ return(State.body_for_drag_(_sCardId)); });
+	// S5 정렬/출처 필터/휴지통 스트립 - hListHost 의 자식이다(CardList/hHistory 와 같은
+	// 자리, spec §3.1.1). 높이는 일부러 넉넉하다 - CBS_DROPDOWNLIST 의 높이 인자는 열린
+	// 드롭다운의 최대 폭이지 닫힌 상자만이 아니다(spec §3.1.3). Layout() 이 실제 위치를
+	// 잡는다.
+	State.hSortCombo = ::CreateWindowExW(0, L"COMBOBOX", L"",
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+		0, 0, 1, 24 + 3 * 20, _hListHost,
+		reinterpret_cast<HMENU>(IDC_DOCUMENT_SORT_COMBO), _hInstance, nullptr);
+	State.hSourceFilter = ::CreateWindowExW(0, L"COMBOBOX", L"",
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+		0, 0, 1, 24 + 6 * 20, _hListHost,
+		reinterpret_cast<HMENU>(IDC_DOCUMENT_SOURCE_FILTER), _hInstance, nullptr);
+	State.hTrashButton = ::CreateWindowExW(0, L"BUTTON", L"카드 휴지통",
+		WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+		0, 0, 1, 1, _hListHost,
+		reinterpret_cast<HMENU>(IDC_DOCUMENT_TRASH_BUTTON), _hInstance, nullptr);
 	State.hHistory = ::CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
 		WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
 		0, 0, 1, 1, _hListHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_HISTORY), _hInstance, nullptr);
@@ -454,12 +589,99 @@ bool C_DOCUMENT_PAGE::Init(
 	State.hEditor = ::CreateWindowExW(WS_EX_CLIENTEDGE, MSFTEDIT_CLASS, L"",
 		WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
 		0, 0, 1, 1, _hEditorHost, reinterpret_cast<HMENU>(IDC_DOCUMENT_EDITOR), _hInstance, nullptr);
-	if (!State.hHistory || !State.hFind || !State.hReplace || !State.hEditor ||
+	// 카드 목록 소유 tooltips 창 - 스트립 3개는 서브클래스 자동 표시, 카드 목록은 트래킹
+	// 형이다(spec §3.2.7~8, decision H-4: 진짜 shower/hider 를 이 Init 이 직접 건다).
+	State.hTooltip = ::CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASS, nullptr,
+		TTS_ALWAYSTIP | TTS_NOPREFIX, 0, 0, 0, 0, _hListHost, nullptr, _hInstance, nullptr);
+	if (!State.hSortCombo || !State.hSourceFilter || !State.hTrashButton ||
+		!State.hHistory || !State.hFind || !State.hReplace || !State.hEditor ||
 		!::SetWindowSubclass(State.hEditor, &S_STATE::EditorSubclass, 1,
+			reinterpret_cast<DWORD_PTR>(&State)) ||
+		// hListHost 는 CMain 이 만든 장수 pane 이다 - 이 컨트롤들의 WM_COMMAND 를 가로챌
+		// 서브클래스는 페이지가 직접 건다(spec §3.1.5). id 2 다(EditorSubclass 가 hEditor
+		// 에 id 1 을 이미 쓴다). 재-Init 에서 다시 걸어도 무해하다(SetWindowSubclass 가
+		// 참조 데이터를 그 자리에서 갱신한다).
+		!::SetWindowSubclass(State.hListHost, &S_STATE::ListHostSubclass, 2,
 			reinterpret_cast<DWORD_PTR>(&State)))
 	{
 		this->Cleanup();
 		return(false);
+	}
+	// 항목 순서는 부록 A-1/A-2 그대로다(index = enum order, 기본 선택은 둘 다 0).
+	for (const wchar_t* pItem : { L"최근 활동순", L"현재 문서 순서", L"최초 기록 순서" })
+	{
+		::SendMessageW(State.hSortCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(pItem));
+	}
+	for (const wchar_t* pItem :
+		{ L"모든 출처", L"직접 입력", L"붙여넣기", L"혼합", L"가져오기", L"복구" })
+	{
+		::SendMessageW(State.hSourceFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(pItem));
+	}
+	::SendMessageW(State.hSortCombo, CB_SETCURSEL, 0, 0);
+	::SendMessageW(State.hSourceFilter, CB_SETCURSEL, 0, 0);
+	if (State.hTooltip)
+	{
+		::SetWindowPos(State.hTooltip, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		// 6~7줄 툴팁이 \n 에서 실제로 줄바꿈하려면 필요하다 - 없으면 한 줄로 접힌다.
+		::SendMessageW(State.hTooltip, TTM_SETMAXTIPWIDTH, 0, 400);
+		auto add_subclass_tool = [&State](HWND _hControl, const wchar_t* _pText)
+			{
+				TTTOOLINFOW Info{};
+				// 이 앱은 Common Controls v6 매니페스트 의존이 없다(구 클래식 comctl32 로드,
+				// spec §3.2.8) - sizeof(TTTOOLINFOW) 는 v6 이후 늘어난 필드(lParam 등)까지
+				// 포함해 구 DLL 이 TTM_ADDTOOL/TTM_GETTOOLINFO 를 조용히 실패시킨다. V1
+				// 크기만 쓴다(fix1 F10 — 들여쓰기 정리).
+				Info.cbSize = TTTOOLINFOW_V1_SIZE;
+				Info.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
+				Info.hwnd = State.hListHost;
+				Info.uId = reinterpret_cast<UINT_PTR>(_hControl);
+				Info.lpszText = const_cast<wchar_t*>(_pText);
+				::SendMessageW(State.hTooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&Info));
+			};
+		add_subclass_tool(State.hSortCombo,
+			L"카드를 최근 활동, 현재 문서 순서 또는 최초 기록 순서로 정렬");
+		add_subclass_tool(State.hSourceFilter, L"선택한 입력 출처의 카드만 표시");
+		add_subclass_tool(State.hTrashButton, L"삭제한 카드를 확인하고 복구하거나 완전 삭제");
+		// 카드 목록 자신의 툴팁은 트래킹 형이다 - hover 콜백이 위치·본문을 직접 민다.
+		TTTOOLINFOW Tracked{};
+		Tracked.cbSize = TTTOOLINFOW_V1_SIZE;
+		Tracked.uFlags = TTF_TRACK | TTF_ABSOLUTE;
+		Tracked.hwnd = State.hListHost;
+		Tracked.uId = reinterpret_cast<UINT_PTR>(State.CardList.m_hWnd);
+		Tracked.lpszText = const_cast<wchar_t*>(L"");
+		::SendMessageW(State.hTooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&Tracked));
+		// 진짜 shower/hider - 이 Init 이 직접 건다(decision H-4: comctl32 툴팁은 비모달이라
+		// TrackPopupMenu/DoDragDrop 과 달리 어떤 페이지 픽스처에서도 안전하다, spec §3.2.7).
+		State.CardList.SetTooltipShower(
+			[&State](std::size_t, const std::wstring& _sText, POINT _Screen)
+			{
+				TTTOOLINFOW Info{};
+				// 이 앱은 Common Controls v6 매니페스트 의존이 없다(구 클래식 comctl32 로드,
+				// spec §3.2.8) - sizeof(TTTOOLINFOW) 는 v6 이후 늘어난 필드(lParam 등)까지
+				// 포함해 구 DLL 이 TTM_ADDTOOL/TTM_GETTOOLINFO 를 조용히 실패시킨다. V1
+				// 크기만 쓴다(fix1 F10 — 들여쓰기 정리).
+				Info.cbSize = TTTOOLINFOW_V1_SIZE;
+				Info.hwnd = State.hListHost;
+				Info.uId = reinterpret_cast<UINT_PTR>(State.CardList.m_hWnd);
+				std::wstring sText = _sText;
+				Info.lpszText = sText.data();
+				::SendMessageW(State.hTooltip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&Info));
+				::SendMessageW(State.hTooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(_Screen.x, _Screen.y));
+				::SendMessageW(State.hTooltip, TTM_TRACKACTIVATE, TRUE, reinterpret_cast<LPARAM>(&Info));
+			});
+		State.CardList.SetTooltipHider(
+			[&State]()
+			{
+				TTTOOLINFOW Info{};
+				// 이 앱은 Common Controls v6 매니페스트 의존이 없다(구 클래식 comctl32 로드,
+				// spec §3.2.8) - sizeof(TTTOOLINFOW) 는 v6 이후 늘어난 필드(lParam 등)까지
+				// 포함해 구 DLL 이 TTM_ADDTOOL/TTM_GETTOOLINFO 를 조용히 실패시킨다. V1
+				// 크기만 쓴다(fix1 F10 — 들여쓰기 정리).
+				Info.cbSize = TTTOOLINFOW_V1_SIZE;
+				Info.hwnd = State.hListHost;
+				Info.uId = reinterpret_cast<UINT_PTR>(State.CardList.m_hWnd);
+				::SendMessageW(State.hTooltip, TTM_TRACKACTIVATE, FALSE, reinterpret_cast<LPARAM>(&Info));
+			});
 	}
 	if (!State.refresh_cards()) { this->Cleanup(); return(false); }
 	app::C_WORKSPACE_STATE_STORE Store(_Database, _Repositories, State.sWorkspaceId);
@@ -471,6 +693,10 @@ bool C_DOCUMENT_PAGE::Init(
 	}
 	State.Projection->SetSortMode(UiState.eSortMode);
 	if (!State.refresh_cards()) { this->Cleanup(); return(false); }
+	// 복원된 모드를 콤보 표시에 맞춘다 - CB_SETCURSEL 은 CBN_SELCHANGE 를 보내지 않으므로
+	// 재귀 호출이 없다(측정: investigation §3-6, spec §3.1.9).
+	::SendMessageW(State.hSortCombo, CB_SETCURSEL,
+		static_cast<WPARAM>(sort_combo_index(UiState.eSortMode)), 0);
 	if (UiState.sSelectedCardId)
 	{
 		const auto nRow = State.Projection->RowForCard(*UiState.sSelectedCardId);
@@ -669,8 +895,18 @@ bool C_DOCUMENT_PAGE::Cleanup()
 		bOk = bOk && Released.eOutcome == app::E_DRAFT_OUTCOME::Ok;
 		m_pState->sDraftId.reset();
 	}
+	// hListHost 는 페이지가 만들지도 부수지도 않는다(CMain 이 재활용하는 장수 pane 이다) -
+	// 서브클래스만 여기서 명시로 걷는다. 최종 Cleanup() 은 소멸자 안에서 도는데, 그 시점에
+	// 도 hListHost 는 보통 살아 있다(CMain 소유). WM_NCDESTROY 에 맡기면(EditorSubclass 의
+	// 방식) 페이지 객체가 죽은 뒤에도 pane 의 서브클래스 사슬에 죽은 &State 를 가리키는
+	// 항목이 남는다(spec §3.1.5, ratified departure).
+	if (::IsWindow(m_pState->hListHost))
+	{
+		::RemoveWindowSubclass(m_pState->hListHost, &S_STATE::ListHostSubclass, 2);
+	}
 	if (m_pState->CardList.IsWindow()) { m_pState->CardList.DestroyWindow(); }
-	HWND* Windows[] = { &m_pState->hHistory,
+	HWND* Windows[] = { &m_pState->hSortCombo, &m_pState->hSourceFilter,
+		&m_pState->hTrashButton, &m_pState->hTooltip, &m_pState->hHistory,
 		&m_pState->hFind, &m_pState->hReplace, &m_pState->hEditor };
 	for (HWND* pWindow : Windows)
 	{
@@ -691,8 +927,31 @@ void C_DOCUMENT_PAGE::Layout()
 	RECT EditorClient{};
 	::GetClientRect(m_pState->hListHost, &ListClient);
 	::GetClientRect(m_pState->hEditorHost, &EditorClient);
-	::MoveWindow(m_pState->CardList.m_hWnd, 0, 0, ListClient.right, ListClient.bottom, TRUE);
-	::MoveWindow(m_pState->hHistory, 0, 0, ListClient.right, ListClient.bottom, TRUE);
+	// S5 정렬/필터 위 · 휴지통 아래, 두 행 24 DIP 씩(spec §3.1.3, "DPI-scaled") - 두
+	// 번째 반이 홀수 폭의 나머지를 흡수한다(QHBoxLayout 1:1 stretch 와 같다). 96 DPI 에서는
+	// 지금과 같은 24 다(fix1 F2 — 감사 parity-2).
+	const LONG STRIP_ROW_HEIGHT_DIP = ::MulDiv(24,
+		static_cast<int>(::GetDpiForWindow(m_pState->hListHost)), USER_DEFAULT_SCREEN_DPI);
+	// 콤보의 창 높이는 열린 드롭다운의 최대 높이를 정한다(spec §3.1.3) - 닫힌 상자는
+	// 콤보가 스스로 표준 높이로 줄이므로, 여기서도 생성 때(Init 의 24 + itemCount*20)와
+	// 같은 넉넉한 높이를 줘야 목록이 잘리지 않는다. 스트립의 논리 행 높이는 여전히
+	// STRIP_ROW_HEIGHT_DIP 다(fix1 F1 — 감사 parity-1: Layout() 이 24 로 다시 누르면
+	// Init 의 예방책이 무효화됐었다).
+	const LONG SORT_COMBO_HEIGHT_DIP = STRIP_ROW_HEIGHT_DIP + 3 * 20;
+	const LONG FILTER_COMBO_HEIGHT_DIP = STRIP_ROW_HEIGHT_DIP + 6 * 20;
+	const LONG nHalfWidth = ListClient.right / 2;
+	::MoveWindow(m_pState->hSortCombo, 0, 0, nHalfWidth, SORT_COMBO_HEIGHT_DIP, TRUE);
+	::MoveWindow(m_pState->hSourceFilter, nHalfWidth, 0,
+		ListClient.right - nHalfWidth, FILTER_COMBO_HEIGHT_DIP, TRUE);
+	::MoveWindow(m_pState->hTrashButton, 0, STRIP_ROW_HEIGHT_DIP,
+		ListClient.right, STRIP_ROW_HEIGHT_DIP, TRUE);
+	const LONG nStripHeight = 2 * STRIP_ROW_HEIGHT_DIP;
+	// 짧은 fixture 픽스처(예: w4_card_list_test.cpp 의 48 DIP pane)가 스트립 높이와
+	// 정확히 같으면 바닥으로 1 DIP 까지 눌린다 - 기존 편집면 한 줄 아래의
+	// (std::max)(1L, ...) 관용구와 같다(spec §3.1.3).
+	const LONG nListHeight = (std::max)(1L, ListClient.bottom - nStripHeight);
+	::MoveWindow(m_pState->CardList.m_hWnd, 0, nStripHeight, ListClient.right, nListHeight, TRUE);
+	::MoveWindow(m_pState->hHistory, 0, nStripHeight, ListClient.right, nListHeight, TRUE);
 	const bool bFind = ::IsWindowVisible(m_pState->hFind) != FALSE;
 	const bool bReplace = ::IsWindowVisible(m_pState->hReplace) != FALSE;
 	int nTop = 0;
@@ -902,7 +1161,10 @@ bool C_DOCUMENT_PAGE::Save()
 	{
 		m_pState->sCurrentCardId = Result.Card->sId;
 		m_pState->Projection->UpdateCard(*Result.Card);
+		// S5: 저장 경로의 대칭 가드 - false 와 비교한다(spec §3.4.4).
+		const bool bWasDirty = m_pState->Projection->IsCardDirty(Result.Card->sId);
 		m_pState->Projection->SetCardDirty(Result.Card->sId, false);
+		if (bWasDirty) { m_pState->CardList.NotifyCardDirtyChanged(Result.Card->sId); }
 	}
 	if (!m_pState->refresh_cards()) { return(false); }
 	m_pState->notify_change();
@@ -919,6 +1181,10 @@ void C_DOCUMENT_PAGE::FocusCardList()
 {
 	::ShowWindow(m_pState->hHistory, SW_HIDE);
 	::ShowWindow(m_pState->CardList.m_hWnd, SW_SHOW);
+	// S5: 이력 화면에서 카드 화면으로 돌아오면 스트립도 함께 되돌아온다(spec §3.1.4).
+	::ShowWindow(m_pState->hSortCombo, SW_SHOW);
+	::ShowWindow(m_pState->hSourceFilter, SW_SHOW);
+	::ShowWindow(m_pState->hTrashButton, SW_SHOW);
 	::SetFocus(m_pState->CardList.m_hWnd);
 }
 
@@ -926,6 +1192,11 @@ void C_DOCUMENT_PAGE::ShowHistory()
 {
 	::ShowWindow(m_pState->CardList.m_hWnd, SW_HIDE);
 	::ShowWindow(m_pState->hHistory, SW_SHOW);
+	// S5: 원본은 mode_stack 전체를 바꿔치기해 스트립이 화면에서 통째로 사라진다 - 네이티브
+	// 는 같은 pane 을 공유하므로 명시로 숨긴다(spec §3.1.4, investigation risk 2).
+	::ShowWindow(m_pState->hSortCombo, SW_HIDE);
+	::ShowWindow(m_pState->hSourceFilter, SW_HIDE);
+	::ShowWindow(m_pState->hTrashButton, SW_HIDE);
 	::SetFocus(m_pState->hHistory);
 }
 
@@ -943,6 +1214,43 @@ HWND C_DOCUMENT_PAGE::EditorHwnd() const noexcept { return(m_pState->hEditor); }
 HWND C_DOCUMENT_PAGE::FindHwnd() const noexcept { return(m_pState->hFind); }
 HWND C_DOCUMENT_PAGE::ReplaceHwnd() const noexcept { return(m_pState->hReplace); }
 HWND C_DOCUMENT_PAGE::HistoryHwnd() const noexcept { return(m_pState->hHistory); }
+HWND C_DOCUMENT_PAGE::SortComboHwnd() const noexcept { return(m_pState->hSortCombo); }
+HWND C_DOCUMENT_PAGE::SourceFilterHwnd() const noexcept { return(m_pState->hSourceFilter); }
+HWND C_DOCUMENT_PAGE::TrashButtonHwnd() const noexcept { return(m_pState->hTrashButton); }
+HWND C_DOCUMENT_PAGE::TooltipHwnd() const noexcept { return(m_pState->hTooltip); }
+
+void C_DOCUMENT_PAGE::SetSortMode(domain::E_CARD_LIST_SORT_MODE _eMode)
+{
+	auto& State = *m_pState;
+	// 같은 값이면 core 를 건드리기 전에 여기서 먼저 돌아간다 - core 자체 조기 반환은
+	// CancelPendingBrowse()/OnProjectionChanged() 같은 페이지 수준 부작용을 못 막는다
+	// (spec §3.1.6).
+	if (State.Projection->SortMode() == _eMode) { return; }
+	State.CardList.CancelPendingBrowse();
+	State.Projection->SetSortMode(_eMode);
+	State.CardList.OnProjectionChanged();
+}
+
+void C_DOCUMENT_PAGE::SetSourceFilter(std::optional<domain::E_CARD_SOURCE> _eSource)
+{
+	auto& State = *m_pState;
+	// 원본 card_model.py:362~363 의 같은 값 가드 쌍둥이 - 이유는 SetSortMode 와 같다
+	// (spec §3.1.7).
+	if (State.eSourceFilter == _eSource) { return; }
+	State.eSourceFilter = _eSource;
+	State.CardList.CancelPendingBrowse();
+	// 콤보는 언제나 원소 1개뿐인 집합 또는 빈 필터만 만든다 - UI 경로는 다중 출처를
+	// 만들지 않는다(spec §2 의 CAP-FI-057 정정).
+	State.Projection->SetSourceFilter(_eSource ?
+		std::optional<std::set<domain::E_CARD_SOURCE>>{ std::set<domain::E_CARD_SOURCE>{ *_eSource } } :
+		std::nullopt);
+	State.CardList.OnProjectionChanged();
+}
+
+std::optional<domain::E_CARD_SOURCE> C_DOCUMENT_PAGE::SourceFilter() const noexcept
+{
+	return(m_pState->eSourceFilter);
+}
 bool C_DOCUMENT_PAGE::IsHistoryVisible() const noexcept
 {
 	return(m_pState->hHistory && ::IsWindowVisible(m_pState->hHistory));

@@ -1,5 +1,10 @@
 ﻿#include "CCardList.h"
 
+// UIA 는 CCardList.h(ATL/WTL + ole2.h) 뒤, core 도메인 헤더 앞이다 - 이 파일은
+// CDocumentPage.cpp 와 달리 #undef CreateEvent 를 하지 않는다(어느 core 헤더도 여기서
+// 충돌하는 CreateEvent 를 선언하지 않는다, spec §3.3.4).
+#include <uiautomation.h>
+
 #include <D2DWrapp/D2DBrushCache.h>
 #include <D2DWrapp/D2DDevice.h>
 
@@ -12,17 +17,21 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <utility>
 
 #pragma comment(lib, "D2DWrapp")
 // RegisterDragDrop·DoDragDrop·ReleaseStgMedium 은 ole32 다(기본 의존 목록에 있으나 명시한다).
 #pragma comment(lib, "Ole32")
+// UiaReturnRawElementProvider·UiaHostProviderFromHwnd 자리다(spec §3.3.4).
+#pragma comment(lib, "uiautomationcore")
 
 namespace
 {
@@ -900,6 +909,99 @@ namespace
 		::ReleaseStgMedium(&Medium);
 		return(Result);
 	}
+
+	// WM_GETOBJECT 마다 새로 만들고 호출이 끝나면 곧바로 놓는다(decision H-6, spec §3.3.1/§3.3.3).
+	// 원시 C_CARD_LIST* 를 들지 않고 공유 원자 플래그만 들어 - 창이 죽은 뒤 살아남은 참조도
+	// nullptr 을 읽고 VT_EMPTY/UIA_E_ELEMENTNOTAVAILABLE 로 답한다(dangling 역참조 없음).
+	// CEILING: 행별 IRawElementProviderFragment 트리는 W7 이후 별건(상향 경로 =
+	// FragmentRoot + 행 fragment 구현)
+	class C_CARD_LIST_UIA_PROVIDER final : public IRawElementProviderSimple
+	{
+	public:
+		explicit C_CARD_LIST_UIA_PROVIDER(
+			std::shared_ptr<std::atomic<C_CARD_LIST*>> _pLiveness)
+			: m_pLiveness(std::move(_pLiveness)) {}
+
+		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID _Riid, void** _ppObject) override
+		{
+			if (!_ppObject) { return(E_POINTER); }
+			*_ppObject = nullptr;
+			if (_Riid == IID_IUnknown || _Riid == __uuidof(IRawElementProviderSimple))
+			{
+				*_ppObject = static_cast<IRawElementProviderSimple*>(this);
+				this->AddRef();
+				return(S_OK);
+			}
+			return(E_NOINTERFACE);
+		}
+		ULONG STDMETHODCALLTYPE AddRef() override { return(++m_nReference); }
+		ULONG STDMETHODCALLTYPE Release() override
+		{
+			const ULONG nLeft = --m_nReference;
+			if (nLeft == 0) { delete this; }
+			return(nLeft);
+		}
+		HRESULT STDMETHODCALLTYPE get_ProviderOptions(ProviderOptions* _pOptions) override
+		{
+			if (!_pOptions) { return(E_POINTER); }
+			*_pOptions = ProviderOptions_ServerSideProvider;
+			return(S_OK);
+		}
+		HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID, IUnknown** _ppOut) override
+		{
+			// 이 슬라이스는 어떤 UIA 패턴도 구현하지 않는다(§3.3의 선언된 상한).
+			if (_ppOut) { *_ppOut = nullptr; }
+			return(S_OK);
+		}
+		HRESULT STDMETHODCALLTYPE GetPropertyValue(PROPERTYID _nPropertyId, VARIANT* _pValue) override
+		{
+			if (!_pValue) { return(E_POINTER); }
+			::VariantInit(_pValue);
+			C_CARD_LIST* pControl = m_pLiveness ? m_pLiveness->load() : nullptr;
+			// 창이 죽은 뒤(또는 아직 붙지 않은 채) 들어온 질의는 전부 VT_EMPTY 다(spec §3.3.3).
+			if (!pControl) { return(S_OK); }
+			if (_nPropertyId == UIA_ControlTypePropertyId)
+			{
+				_pValue->vt = VT_I4;
+				_pValue->lVal = UIA_ListControlTypeId;
+			}
+			else if (_nPropertyId == UIA_NamePropertyId)
+			{
+				std::wstring sName;
+				const domain::C_CARD_LIST_PROJECTION* pProjection = pControl->Projection();
+				if (pProjection && pProjection->CurrentCardId())
+				{
+					const std::optional<std::string_view> Body =
+						pProjection->FullBodyForCard(*pProjection->CurrentCardId());
+					// 정규화·자르기·트리밍 없음 - CR·탭·앞뒤 공백·2만자 본문을 바이트 그대로 싣는다.
+					if (Body) { sName = wide(std::string(*Body)); }
+				}
+				_pValue->vt = VT_BSTR;
+				_pValue->bstrVal = ::SysAllocString(sName.c_str());
+			}
+			else if (_nPropertyId == UIA_IsControlElementPropertyId ||
+				_nPropertyId == UIA_IsContentElementPropertyId)
+			{
+				_pValue->vt = VT_BOOL;
+				_pValue->boolVal = VARIANT_TRUE;
+			}
+			// 그 밖의 모든 속성은 VT_EMPTY 로 남는다(VariantInit 이 이미 그렇게 했다).
+			return(S_OK);
+		}
+		HRESULT STDMETHODCALLTYPE get_HostRawElementProvider(
+			IRawElementProviderSimple** _ppOut) override
+		{
+			if (!_ppOut) { return(E_POINTER); }
+			*_ppOut = nullptr;
+			C_CARD_LIST* pControl = m_pLiveness ? m_pLiveness->load() : nullptr;
+			if (!pControl || !pControl->IsWindow()) { return(S_OK); }
+			return(::UiaHostProviderFromHwnd(pControl->m_hWnd, _ppOut));
+		}
+
+	private:
+		std::shared_ptr<std::atomic<C_CARD_LIST*>> m_pLiveness;
+		ULONG m_nReference{ 1 };
+	};
 }
 
 // 등록소는 컨트롤 인스턴스마다 하나다 - 토큰이 인스턴스 안에서만 단조 증가하고 창끼리
@@ -1369,11 +1471,10 @@ void C_CARD_LIST::SetDisplaySettings(const S_CARD_LIST_DISPLAY& _Display)
 	m_sTimeZoneUtf8 = narrow(m_Display.sTimeZone);
 	this->resolve_font_();
 	m_nLineSpacingDip = 0;
-	if (this->IsWindow())
-	{
-		this->update_scroll_bar_();
-		this->Invalidate(FALSE);
-	}
+	if (this->IsWindow()) { this->update_scroll_bar_(); }
+	// 무조건이다(원본 apply_time_display 의 무조건 dataChanged) - invalidate_all_rows_ 자체가
+	// 로그(RowCount()>0)와 실제 다시 그리기(IsWindow())를 독립적으로 가른다(spec §3.4.4).
+	this->invalidate_all_rows_({ E_CARD_INVALIDATION_ROLE::Tooltip });
 }
 
 void C_CARD_LIST::OnProjectionChanged()
@@ -1389,6 +1490,9 @@ void C_CARD_LIST::OnProjectionChanged()
 	this->ScrollToPixel(m_nScrollOffsetDip);
 	this->update_scroll_bar_();
 	if (this->IsWindow()) { this->Invalidate(FALSE); }
+	// 여섯 숨김 트리거 중 하나 - 리셋은 dataChanged 가 아니므로 로그에는 오르지 않는다
+	// (spec §3.4.3/§3.4.4 다섯째 항목).
+	if (m_TooltipHider) { m_TooltipHider(); }
 }
 
 std::size_t C_CARD_LIST::RowCount() const noexcept
@@ -1500,9 +1604,28 @@ void C_CARD_LIST::update_scroll_bar_()
 	::SetScrollInfo(this->m_hWnd, SB_VERT, &Info, TRUE);
 }
 
-void C_CARD_LIST::invalidate_row_(std::optional<std::size_t> _nRow)
+bool C_CARD_LIST::roles_loggable_(const std::vector<E_CARD_INVALIDATION_ROLE>& _Roles) const noexcept
+{
+	// Hover·Selection 만으로 이루어진 역할 목록은 절대 로그에 오르지 않는다(spec §3.4.3) -
+	// Hover 는 마우스 이동마다 나는 무한 증가 생산자이고 Selection 은 현재 발생원이 없다.
+	for (const E_CARD_INVALIDATION_ROLE eRole : _Roles)
+	{
+		if (eRole != E_CARD_INVALIDATION_ROLE::Hover &&
+			eRole != E_CARD_INVALIDATION_ROLE::Selection) { return(true); }
+	}
+	return(false);
+}
+
+void C_CARD_LIST::invalidate_row_(std::optional<std::size_t> _nRow,
+	std::vector<E_CARD_INVALIDATION_ROLE> _Roles)
 {
 	if (!_nRow || !this->IsWindow()) { return; }
+	// 로그 append 는 이 이른 반환을 지난 뒤에만, 그리고 역할이 loggable 할 때만 일어난다 -
+	// 행이 실제로 무효화될 때만 기록한다(spec §3.4.3 첫 항목).
+	if (this->roles_loggable_(_Roles))
+	{
+		m_InvalidationLog.push_back(S_CARD_INVALIDATION_ENTRY{ *_nRow, *_nRow, std::move(_Roles) });
+	}
 	const S_DIP_RECT Row = this->RowRectDip(*_nRow);
 	const int nDpi = static_cast<int>((std::max<UINT>)(USER_DEFAULT_SCREEN_DPI, m_nDpi));
 	RECT Invalid{
@@ -1511,6 +1634,19 @@ void C_CARD_LIST::invalidate_row_(std::optional<std::size_t> _nRow)
 		::MulDiv(Row.nLeft + Row.nWidth, nDpi, USER_DEFAULT_SCREEN_DPI),
 		::MulDiv(Row.nTop + Row.nHeight, nDpi, USER_DEFAULT_SCREEN_DPI) };
 	::InvalidateRect(this->m_hWnd, &Invalid, FALSE);
+}
+
+void C_CARD_LIST::invalidate_all_rows_(std::vector<E_CARD_INVALIDATION_ROLE> _Roles)
+{
+	// 두 조건은 독립이다 - 빈 모델도 창이 있으면 무조건 다시 그리지만(기존 SetDisplaySettings
+	// 의 무조건 Invalidate(FALSE) 와 동일), 로그 항목만 행 수에 따라 남긴다(spec §3.4.3).
+	const std::size_t nRows = this->RowCount();
+	if (nRows > 0)
+	{
+		m_InvalidationLog.push_back(
+			S_CARD_INVALIDATION_ENTRY{ 0, nRows - 1, std::move(_Roles) });
+	}
+	if (this->IsWindow()) { this->Invalidate(FALSE); }
 }
 
 std::optional<std::size_t> C_CARD_LIST::row_at_dip_(int _nYdip) const
@@ -1753,6 +1889,106 @@ void C_CARD_LIST::reset_press_state_()
 	m_bNoSelectionOnMousePress = false;
 	m_eViewState = E_CARD_LIST_VIEW_STATE::NoState;
 	m_DragSnapshot.reset();
+}
+
+void C_CARD_LIST::arm_hover_tracking_()
+{
+	TRACKMOUSEEVENT Track{};
+	Track.cbSize = sizeof(Track);
+	// TME_HOVER 는 1회성이다 - WM_MOUSEHOVER 가 뜨면 취소되고 TME_LEAVE 추적만 남는다.
+	// OnMouseHover 가 매번 무조건 이 함수를 다시 불러 재무장한다(spec §3.2.5).
+	// CEILING: Qt 의 되살아나기 창(마지막 툴팁 표시 뒤 2000 ms 안이면 즉시 재표시)과
+	// 표시 지속 시간 자체는 이식하지 않았다 - HOVER_DEFAULT(시스템 hover 시간)만
+	// 재현한다(spec §3.2.5의 declared deviation, canon [UNCERTAIN] 1)
+	Track.dwFlags = TME_LEAVE | TME_HOVER;
+	Track.hwndTrack = this->m_hWnd;
+	Track.dwHoverTime = HOVER_DEFAULT;
+	m_bTrackingMouse = ::TrackMouseEvent(&Track) != FALSE;
+	++m_nHoverArmCount;
+}
+
+std::wstring C_CARD_LIST::source_label_(domain::E_CARD_SOURCE _eSource) const
+{
+	// S5 소유 상수 표다(card_model.py:477~488) - core 는 이 라벨을 모른다(spec §3.2.3).
+	// 앞 5개만 콤보 항목을 갖고(§3.1.2), Split/Merge/System 은 툴팁 전용 라벨이다.
+	switch (_eSource)
+	{
+	case domain::E_CARD_SOURCE::Typing: return(L"직접 입력");
+	case domain::E_CARD_SOURCE::Paste: return(L"붙여넣기");
+	case domain::E_CARD_SOURCE::Mixed: return(L"혼합");
+	case domain::E_CARD_SOURCE::Import: return(L"가져오기");
+	case domain::E_CARD_SOURCE::Restore: return(L"복구");
+	case domain::E_CARD_SOURCE::Split: return(L"분할");
+	case domain::E_CARD_SOURCE::Merge: return(L"병합");
+	case domain::E_CARD_SOURCE::System: return(L"시스템");
+	default: return(std::wstring{});
+	}
+}
+
+void C_CARD_LIST::SetRevisionCounts(std::unordered_map<std::string, int> _Counts)
+{
+	// 조용하다 - 자체 무효화가 없고 뒤따르는 리셋(SetCards/OnProjectionChanged)에 실려
+	// 간다(원본 set_cards(cards, revision_counts=...) 와 같은 접힘, spec §3.4.1/§3.4.2).
+	m_RevisionCounts = std::move(_Counts);
+}
+
+void C_CARD_LIST::SetReconstructionUnavailableIds(std::set<std::string> _Ids)
+{
+	m_ReconstructionUnavailable = std::move(_Ids);
+	// 무조건이다 - 집합이 이전과 바이트 단위로 같아도 다시 로그·무효화한다. 원본
+	// set_reconstruction_unavailable_ids 에는 변경 없음 조기 반환이 없다(spec §3.4.4 첫 항목).
+	this->invalidate_all_rows_({ E_CARD_INVALIDATION_ROLE::Reconstruction,
+		E_CARD_INVALIDATION_ROLE::Tooltip, E_CARD_INVALIDATION_ROLE::SizeHint });
+}
+
+std::wstring C_CARD_LIST::TooltipTextForRow(std::size_t _nRow) const
+{
+	// 순수 조회다 - 절대 캐시하지 않는다(spec §3.2.4, canon M23: Qt 의 update_card 9역할
+	// 목록에 ToolTipRole 이 없는데도 표시 시점에 재조회해 최신값을 보여 준다).
+	if (!m_pProjection) { return(std::wstring{}); }
+	const domain::S_CARD* pCard = m_pProjection->CardAt(_nRow);
+	if (!pCard) { return(std::wstring{}); }
+	const std::optional<std::size_t> nPosition = m_pProjection->PositionNumber(pCard->sId);
+	const std::wstring sSource = this->source_label_(pCard->eSource);
+	const std::wstring sCreated = this->TimeLabel(pCard->nCreatedAtUs);
+	const std::wstring sUpdated = this->TimeLabel(pCard->nUpdatedAtUs);
+	const auto ItRevision = m_RevisionCounts.find(pCard->sId);
+	// 캐시에 없는 카드는 리비전 1(원본 .get(card.id, 1), card_model.py:141).
+	const int nRevision = ItRevision != m_RevisionCounts.end() ? ItRevision->second : 1;
+	const bool bUnavailable = m_ReconstructionUnavailable.count(pCard->sId) != 0;
+	// 부록 A-6 축자 템플릿이다 - 구분자는 단일 \n, 첫 두 문장 조각은 공백으로 잇고,
+	// 정상(6줄) 카드는 끝에 개행이 없다. "은" 조사는 받침과 무관하게 고정이다.
+	std::wstring sResult;
+	sResult += L"위치 " + std::to_wstring(nPosition ? *nPosition : 0) +
+		L"은 문서 안의 현재 순서이며 현재 문서 순서 보기에서 이동할 수 있습니다.\n";
+	sResult += L"기록 #" + std::to_wstring(pCard->nCaptureSeq) +
+		L"은 최초 생성 순서이며 바뀌지 않습니다.\n";
+	sResult += L"출처 " + sSource + L"\n";
+	sResult += L"최초 기록 " + sCreated + L"\n";
+	sResult += L"리비전 " + std::to_wstring(nRevision) + L"개\n";
+	sResult += L"수정 " + sUpdated;
+	if (bUnavailable) { sResult += L"\n형제 카드 purge로 작업 원문 재구성 불가"; }
+	return(sResult);
+}
+
+void C_CARD_LIST::NotifyCardDirtyChanged(const std::string& _sCardId)
+{
+	// 호출부(페이지)가 IsCardDirty 값 변화를 이미 확인했다 - 여기서는 행이 아직 있는지만
+	// 본다. 행이 없으면(필터에 가려짐) 로그도 재도장도 없다(spec §3.4.4).
+	if (!m_pProjection) { return; }
+	const std::optional<std::size_t> nRow = m_pProjection->RowForCard(_sCardId);
+	if (!nRow) { return; }
+	this->invalidate_row_(nRow, { E_CARD_INVALIDATION_ROLE::DirtyDraft });
+}
+
+void C_CARD_LIST::SetTooltipShower(TooltipShower _Shower)
+{
+	m_TooltipShower = std::move(_Shower);
+}
+
+void C_CARD_LIST::SetTooltipHider(TooltipHider _Hider)
+{
+	m_TooltipHider = std::move(_Hider);
 }
 
 std::string C_CARD_LIST::drag_body_(const std::string& _sCardId) const
@@ -2518,21 +2754,19 @@ LRESULT C_CARD_LIST::OnVScroll(UINT, WPARAM _wParam, LPARAM, BOOL&)
 
 LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 {
-	if (!m_bTrackingMouse)
-	{
-		TRACKMOUSEEVENT Track{};
-		Track.cbSize = sizeof(Track);
-		Track.dwFlags = TME_LEAVE;
-		Track.hwndTrack = this->m_hWnd;
-		m_bTrackingMouse = ::TrackMouseEvent(&Track) != FALSE;
-	}
+	// TME_HOVER 는 arm_hover_tracking_ 안으로 옮겨졌다(S5) - 여기서는 기존 그대로
+	// !m_bTrackingMouse 가드로만 첫 진입에서 무장한다(spec §3.2.5).
+	if (!m_bTrackingMouse) { this->arm_hover_tracking_(); }
 	const POINT Point = this->point_from_lparam_(_lParam);
 	const std::optional<std::size_t> nRow = this->row_at_dip_(Point.y);
 	if (nRow != m_nHoverRow)
 	{
-		this->invalidate_row_(m_nHoverRow);
+		this->invalidate_row_(m_nHoverRow, { E_CARD_INVALIDATION_ROLE::Hover });
 		m_nHoverRow = nRow;
-		this->invalidate_row_(m_nHoverRow);
+		this->invalidate_row_(m_nHoverRow, { E_CARD_INVALIDATION_ROLE::Hover });
+		// 호버 행이 바뀌면(사라짐 포함) 켜져 있던 툴팁을 숨긴다 - 여섯 숨김 트리거 중 하나
+		// (spec §3.2.6).
+		if (m_TooltipHider) { m_TooltipHider(); }
 	}
 	if ((_wParam & MK_LBUTTON) == 0 || !m_bPressActive || m_bDragConsumedPress) { return(0); }
 
@@ -2582,10 +2816,28 @@ LRESULT C_CARD_LIST::OnMouseMove(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 	return(0);
 }
 
+LRESULT C_CARD_LIST::OnMouseHover(UINT, WPARAM, LPARAM _lParam, BOOL&)
+{
+	// 조립은 여기서만 한다 - OnMouseMove 는 픽셀마다 돌므로 문자열을 만들지 않는다
+	// (spec §3.2.5 투자 위험 8). 샤워가 설치돼 있지 않으면 조립도 하지 않는다.
+	if (m_nHoverRow && m_TooltipShower)
+	{
+		POINT ScreenPoint{ GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) };
+		::ClientToScreen(this->m_hWnd, &ScreenPoint);
+		m_TooltipShower(*m_nHoverRow, this->TooltipTextForRow(*m_nHoverRow), ScreenPoint);
+	}
+	// TME_HOVER 는 1회성이라 무조건 재무장한다 - 안 하면 마우스 진입당 한 번만 뜬다
+	// (spec §3.2.5, BLOCKER-1 의 자기 회귀 가드).
+	this->arm_hover_tracking_();
+	return(0);
+}
+
 LRESULT C_CARD_LIST::OnLButtonDown(UINT, WPARAM _wParam, LPARAM _lParam, BOOL&)
 {
 	// 원본 mousePressEvent(:248)는 어떤 버튼이든 기록 앞에서 먼저 취소한다.
 	this->CancelPendingBrowse();
+	// 여섯 숨김 트리거 중 하나 - 어떤 마우스 press 든 켜져 있던 툴팁을 숨긴다(spec §3.2.6).
+	if (m_TooltipHider) { m_TooltipHider(); }
 	// WM_LBUTTONDBLCLK 도 이 핸들러로 온다 - Qt 는 mouseDoubleClickEvent 를 재정의하지 않으므로
 	// 더블클릭의 두 번째 press 도 평범한 press 이고 열기는 release 에서만 난다(오라클 N5).
 	this->observe_current_();
@@ -2692,6 +2944,8 @@ LRESULT C_CARD_LIST::OnRButtonDown(UINT, WPARAM, LPARAM _lParam, BOOL&)
 {
 	// 원본 mousePressEvent 는 버튼을 가리지 않고 먼저 취소한다.
 	this->CancelPendingBrowse();
+	// 여섯 숨김 트리거 중 하나(spec §3.2.6).
+	if (m_TooltipHider) { m_TooltipHider(); }
 	// 원본 _select_context_index: 미선택 행이면 그 행만 남기고, 선택된 행이면 선택을 유지한 채
 	// 현재만 옮긴다. 컨텍스트 메뉴 자체는 S4 소유라 여기서는 선택 조정만 한다.
 	this->observe_current_();
@@ -2765,6 +3019,8 @@ LRESULT C_CARD_LIST::OnCaptureChanged(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 
 LRESULT C_CARD_LIST::OnMouseWheel(UINT, WPARAM _wParam, LPARAM, BOOL& _bHandled)
 {
+	// 여섯 숨김 트리거 중 하나 - 소비 여부와 무관하게 휠은 툴팁을 숨긴다(spec §3.2.6).
+	if (m_TooltipHider) { m_TooltipHider(); }
 	// 고해상도 장치는 WHEEL_DELTA 보다 작은 각을 보낸다 - 부호 있는 short 로 읽는다.
 	const int nDelta = GET_WHEEL_DELTA_WPARAM(_wParam);
 	const WORD nKeys = GET_KEYSTATE_WPARAM(_wParam);
@@ -2858,6 +3114,8 @@ LRESULT C_CARD_LIST::OnOtherButtonDown(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	// Qt 는 가운데·X 버튼에도 mousePressEvent 를 주고 원본은 그 앞에서 취소한다.
 	// 컨트롤은 이 버튼들을 처리하지 않으므로 취소만 하고 흘려보낸다.
 	this->CancelPendingBrowse();
+	// 여섯 숨김 트리거 중 하나 - "어떤 마우스 press 든"(spec §3.2.6).
+	if (m_TooltipHider) { m_TooltipHider(); }
 	_bHandled = FALSE;
 	return(0);
 }
@@ -2902,7 +3160,9 @@ LRESULT C_CARD_LIST::OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&)
 	m_bTrackingMouse = false;
 	const std::optional<std::size_t> nRow = m_nHoverRow;
 	m_nHoverRow.reset();
-	this->invalidate_row_(nRow);
+	this->invalidate_row_(nRow, { E_CARD_INVALIDATION_ROLE::Hover });
+	// 여섯 숨김 트리거 중 하나(spec §3.2.6).
+	if (m_TooltipHider) { m_TooltipHider(); }
 	return(0);
 }
 
@@ -2981,6 +3241,20 @@ LRESULT C_CARD_LIST::OnCreate(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 	return(0);
 }
 
+LRESULT C_CARD_LIST::OnGetObject(UINT, WPARAM _wParam, LPARAM _lParam, BOOL& _bHandled)
+{
+	if (_lParam != static_cast<LPARAM>(UiaRootObjectId))
+	{
+		_bHandled = FALSE;
+		return(0);
+	}
+	// 지연 생성 - 첫 요청에서만 만들고 이후 모든 제공자 개체가 이 하나를 공유한다.
+	if (!m_pUiaLiveness) { m_pUiaLiveness = std::make_shared<std::atomic<C_CARD_LIST*>>(this); }
+	CComPtr<IRawElementProviderSimple> pProvider;
+	pProvider.Attach(new C_CARD_LIST_UIA_PROVIDER(m_pUiaLiveness));
+	return(::UiaReturnRawElementProvider(this->m_hWnd, _wParam, _lParam, pProvider));
+}
+
 LRESULT C_CARD_LIST::OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 {
 	// RevokeDragDrop 이 가장 먼저다 - 창이 사라진 뒤 OLE 가 대상을 부르지 않게 한다.
@@ -2989,6 +3263,14 @@ LRESULT C_CARD_LIST::OnDestroy(UINT, WPARAM, LPARAM, BOOL& _bHandled)
 		::RevokeDragDrop(this->m_hWnd);
 		m_pDragInternal->bDropRegistered = false;
 	}
+	// UIA 클라이언트가 창 파괴 뒤에도 들고 있을 수 있는 참조를 무해화한다 - RevokeDragDrop
+	// 바로 다음 줄이다(교체가 아니라 추가, spec §3.3.3).
+	if (m_pUiaLiveness)
+	{
+		::UiaReturnRawElementProvider(this->m_hWnd, 0, 0, nullptr);
+		m_pUiaLiveness->store(nullptr);
+	}
+	if (m_TooltipHider) { m_TooltipHider(); }
 	// 살아 있는 세션은 여기서 무효가 된다 - 토큰을 걷고 종료를 정확히 한 번 알린다.
 	this->finish_drag_session_();
 	// 세션 없이 무장만 남은 오버레이(직접 Arm 한 경우)도 여기서 걷는다.

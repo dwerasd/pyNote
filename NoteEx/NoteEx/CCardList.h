@@ -19,13 +19,16 @@
 
 #include "pynote/core/domain/time_zone_resolver.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace d2d
@@ -40,6 +43,7 @@ namespace pynote::core::domain
 {
 	class C_CARD_LIST_PROJECTION;
 	enum class E_CARD_SELECTION_MODE;
+	enum class E_CARD_SOURCE;
 	// 휠 탐색 상태 기계도 같은 이유로 CCardList.cpp 에서만 읽는다(W2-R6 완성분을 소비만 한다).
 	class C_CARD_WHEEL_BROWSE;
 	struct S_CARD_WHEEL_TIMER_COMMAND;
@@ -193,6 +197,23 @@ struct S_CARD_LIST_FRAME
 // 드래그 시작 전 단계일 뿐이고 S4 가 DoDragDrop 으로 본체를 채운다.
 enum class E_CARD_LIST_VIEW_STATE { NoState, DragSelecting, Dragging };
 
+// 델타 무효화 로그의 역할표(S5, spec §3.4.3). Hover·Selection 은 절대 로그에 append
+// 되지 않는다 - Hover 는 마우스 이동마다 나는 무한 증가 생산자이고 Selection 은 현재
+// 발생원 자체가 없다(§3.4.4).
+// CEILING: Hover·Selection 역할은 enum 에 정의만 되고 로그에는 절대 append 되지
+// 않는다 — Hover 는 무한 증가 생산자(사용자 마우스 이동)이고 Selection 은 발생원
+// 자체가 없다(S2 선택 경로의 전체 Invalidate 를 행 단위로 재설계하는 것은 별건,
+// 상향 필요 시 W4 aggregate)
+enum class E_CARD_INVALIDATION_ROLE { Reconstruction, Tooltip, SizeHint, DirtyDraft, Hover, Selection };
+
+struct S_CARD_INVALIDATION_ENTRY
+{
+	std::size_t nFirstRow{ 0 };
+	std::size_t nLastRow{ 0 };
+	std::vector<E_CARD_INVALIDATION_ROLE> Roles;
+	bool operator==(const S_CARD_INVALIDATION_ENTRY&) const = default;
+};
+
 enum class E_CARD_INPUT_PHASE { Press, Move, Release, Key };
 
 enum class E_CARD_SELECTION_COMMAND
@@ -299,6 +320,12 @@ public:
 		std::function<void(const std::string&, pynote::core::domain::CardDragSessionToken)>;
 	using DragFinishedHandler = std::function<void(pynote::core::domain::CardDragSessionToken)>;
 
+	// ---- 카드 툴팁·UIA·델타 무효화 로그(S5) ----
+	// 원본 QToolTip.showText/hideText 자리. 컨트롤 기본값은 비어 있다(제어 seam 관측
+	// 전용) - 진짜 comctl32 트래킹 툴팁은 페이지의 Init 이 건다(spec §3.2.7, decision H-4).
+	using TooltipShower = std::function<void(std::size_t, const std::wstring&, POINT)>;
+	using TooltipHider = std::function<void()>;
+
 	C_CARD_LIST();
 	~C_CARD_LIST();
 	C_CARD_LIST(const C_CARD_LIST&) = delete;
@@ -320,6 +347,8 @@ public:
 	void SetDeleteDroppedHandler(DeleteDroppedHandler _Handler);
 	void SetDragStartedHandler(DragStartedHandler _Handler);
 	void SetDragFinishedHandler(DragFinishedHandler _Handler);
+	void SetTooltipShower(TooltipShower _Shower);
+	void SetTooltipHider(TooltipHider _Hider);
 	// 디바이스·브러시 캐시·텍스트 엔진은 CApplication 소유다. 붙지 않으면 그리지 않고
 	// 나머지(행·LB 메시지·Enter·스크롤 산술)는 그대로 동작한다.
 	void AttachRenderServices(d2d::C_D2D_DEVICE* _pDevice,
@@ -396,6 +425,25 @@ public:
 	const S_CARD_PALETTE& Palette() const noexcept { return(m_Palette); }
 	std::wstring TimeLabel(std::int64_t _nEpochUs) const;
 
+	// ---- 메타 캐시·델타 무효화 로그(S5, spec §3.4) ----
+	// 원본 _revision_counts/_reconstruction_unavailable_ids 자리. 저장소 타입은 여기 들지
+	// 않는다(S1 헤더 격리) - refresh_cards() 가 이미 조회한 값을 밀어 넣기만 한다.
+	void SetRevisionCounts(std::unordered_map<std::string, int> _Counts);
+	void SetReconstructionUnavailableIds(std::set<std::string> _Ids);
+	// 순수 조회 seam - 매 호출마다 재계산하며 절대 캐시하지 않는다(spec §3.2.4, canon M23).
+	std::wstring TooltipTextForRow(std::size_t _nRow) const;
+	// 원본 dirty-marker 갱신의 자리다. 페이지가 IsCardDirty 값 변화를 확인한 뒤에만 부른다
+	// (spec §3.4.4 - 호출부의 가드가 아니라 이 함수 자체는 무조건 재도장·재검사한다).
+	void NotifyCardDirtyChanged(const std::string& _sCardId);
+	const std::vector<S_CARD_INVALIDATION_ENTRY>& InvalidationLog() const noexcept
+	{
+		return(m_InvalidationLog);
+	}
+	void ClearInvalidationLog() { m_InvalidationLog.clear(); }
+	// arm_hover_tracking_ 이 TME_HOVER 를 실은 TrackMouseEvent 를 부른 횟수다 - 재무장이
+	// 실제로 일어났는지 실시간 호버를 기다리지 않고 확인하는 관측 seam(spec §3.2.5).
+	std::size_t HoverArmCount() const noexcept { return(m_nHoverArmCount); }
+
 	BEGIN_MSG_MAP(C_CARD_LIST)
 		MESSAGE_HANDLER(WM_CREATE, OnCreate)
 		MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBkgnd)
@@ -404,6 +452,7 @@ public:
 		MESSAGE_HANDLER(WM_DPICHANGED_AFTERPARENT, OnDpiChangedAfterParent)
 		MESSAGE_HANDLER(WM_VSCROLL, OnVScroll)
 		MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+		MESSAGE_HANDLER(WM_MOUSEHOVER, OnMouseHover)
 		MESSAGE_HANDLER(WM_MOUSELEAVE, OnMouseLeave)
 		MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
 		// Qt 는 mouseDoubleClickEvent 를 재정의하지 않는다 - 두 번째 press 와 같다(오라클 N5).
@@ -433,6 +482,8 @@ public:
 		MESSAGE_HANDLER(WM_SYSCOLORCHANGE, OnPaletteChanged)
 		MESSAGE_HANDLER(WM_THEMECHANGED, OnPaletteChanged)
 		MESSAGE_HANDLER(WM_SETTINGCHANGE, OnPaletteChanged)
+		// UIA 클라이언트가 이 창의 접근성 트리를 요청하는 자리다(spec §3.3.1).
+		MESSAGE_HANDLER(WM_GETOBJECT, OnGetObject)
 		MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
 		MESSAGE_HANDLER(LB_GETCOUNT, OnListGetCount)
 		MESSAGE_HANDLER(LB_GETCURSEL, OnListGetCurSel)
@@ -448,6 +499,7 @@ public:
 	LRESULT OnDpiChangedAfterParent(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnVScroll(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnMouseMove(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnMouseHover(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnMouseLeave(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnLButtonDown(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnLButtonUp(UINT, WPARAM, LPARAM, BOOL&);
@@ -464,6 +516,7 @@ public:
 	LRESULT OnDeferred(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnFocusChanged(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnPaletteChanged(UINT, WPARAM, LPARAM, BOOL&);
+	LRESULT OnGetObject(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnListGetCount(UINT, WPARAM, LPARAM, BOOL&);
 	LRESULT OnListGetCurSel(UINT, WPARAM, LPARAM, BOOL&);
@@ -480,7 +533,14 @@ private:
 	IDWriteTextFormat* text_format_() const;
 	int max_scroll_offset_dip_() const;
 	void update_scroll_bar_();
-	void invalidate_row_(std::optional<std::size_t> _nRow);
+	// 역할 목록이 Hover/Selection 만이면(둘 다거나 둘 중 하나) 로그에는 절대 append 하지
+	// 않는다 - 실제 InvalidateRect 는 그대로 낸다(spec §3.4.3의 loggable-roles 규칙).
+	void invalidate_row_(std::optional<std::size_t> _nRow,
+		std::vector<E_CARD_INVALIDATION_ROLE> _Roles);
+	// SetDisplaySettings/SetReconstructionUnavailableIds 가 쓰는 전행 무효화. 로그 append 는
+	// RowCount() > 0 에만, 실제 Invalidate 호출은 IsWindow() 에만 - 두 조건은 독립이다.
+	void invalidate_all_rows_(std::vector<E_CARD_INVALIDATION_ROLE> _Roles);
+	bool roles_loggable_(const std::vector<E_CARD_INVALIDATION_ROLE>& _Roles) const noexcept;
 	std::optional<std::size_t> row_at_dip_(int _nYdip) const;
 	std::optional<std::size_t> current_row_() const;
 	POINT point_from_lparam_(LPARAM _lParam) const noexcept;
@@ -501,6 +561,11 @@ private:
 	void keyboard_search_(wchar_t _Char);
 	bool prefix_match_(std::size_t _nRow, const std::wstring& _sPrefix) const;
 	void reset_press_state_();
+	// TME_HOVER 는 1회성이다 - OnMouseMove 의 기존 가드 호출과 OnMouseHover 의 무조건
+	// 재무장이 둘 다 이 자리를 부른다(spec §3.2.5). 부를 때마다 관측 카운터를 올린다.
+	void arm_hover_tracking_();
+	// S5 소유 상수 표(card_model.py:477~488) - core 는 이 라벨을 모른다(spec §3.2.3).
+	std::wstring source_label_(pynote::core::domain::E_CARD_SOURCE _eSource) const;
 	// ---- 드래그 앤 드롭 내부(S4) ----
 	pynote::core::domain::CardDragSourceIdentity source_identity_() const noexcept;
 	void ensure_drop_registration_();
@@ -554,6 +619,18 @@ private:
 	mutable int m_nLineSpacingDip{ 0 };
 	std::optional<std::size_t> m_nHoverRow{};
 	bool m_bTrackingMouse{ false };
+
+	// ---- 카드 툴팁·메타 캐시·델타 로그·UIA(S5) ----
+	TooltipShower m_TooltipShower;
+	TooltipHider m_TooltipHider;
+	std::size_t m_nHoverArmCount{ 0 };
+	// 저장소 타입은 여기 들지 않는다 - refresh_cards() 가 조회한 값을 미는 순수 캐시다.
+	std::unordered_map<std::string, int> m_RevisionCounts;
+	std::set<std::string> m_ReconstructionUnavailable;
+	std::vector<S_CARD_INVALIDATION_ENTRY> m_InvalidationLog;
+	// UIA 클라이언트가 창 파괴 뒤에도 들고 있을 수 있는 참조를 무해화하는 공유 원자 플래그
+	// (spec §3.3.3). 첫 WM_GETOBJECT 에서 지연 생성하고 OnDestroy 에서 nullptr 로 비운다.
+	std::shared_ptr<std::atomic<C_CARD_LIST*>> m_pUiaLiveness;
 
 	// ---- 선택 입력 계층(S2). Qt QAbstractItemViewPrivate 의 press 기록에 대응한다. ----
 	E_CARD_LIST_VIEW_STATE m_eViewState{ E_CARD_LIST_VIEW_STATE::NoState };

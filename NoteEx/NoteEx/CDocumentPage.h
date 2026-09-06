@@ -22,7 +22,14 @@ namespace pynote::core::application
 	class C_SAVE_COORDINATOR;
 	struct S_DOCUMENT_UI_STATE;
 }
-namespace pynote::core::domain { class C_CARD_LIST_PROJECTION; }
+namespace pynote::core::domain
+{
+	class C_CARD_LIST_PROJECTION;
+	// S5 정렬/출처 필터 진입점의 인자 타입이다 - 같은 패턴(class C_CARD_LIST_PROJECTION;)의
+	// 불투명 전방 선언이며 core 도메인 헤더는 여기서 읽지 않는다(W3 CreateEvent 순서 계약).
+	enum class E_CARD_LIST_SORT_MODE;
+	enum class E_CARD_SOURCE;
+}
 namespace pynote::core::storage { class C_DATABASE; class C_REPOSITORIES; }
 // 카드 목록 컨트롤(CCardList.h). 헤더에서 전역 선언만 하면 ATL/WTL·D2DWrapp 헤더가
 // 이 파일을 읽는 모든 TU 로 번지지 않는다(W3 시험 TU 의 CreateEvent 순서 계약 보호).
@@ -113,6 +120,19 @@ public:
 	HWND FindHwnd() const noexcept;
 	HWND ReplaceHwnd() const noexcept;
 	HWND HistoryHwnd() const noexcept;
+	// S5 정렬/출처 필터/휴지통 스트립과 카드 툴팁 창(spec §3.1.1/§3.2.8, S2/S3 의
+	// CardListHwnd() 선례).
+	HWND SortComboHwnd() const noexcept;
+	HWND SourceFilterHwnd() const noexcept;
+	HWND TrashButtonHwnd() const noexcept;
+	HWND TooltipHwnd() const noexcept;
+	// 원본 card_model.py:338~367 의 두 진입점(sort_combo/source_filter 의
+	// currentIndexChanged 가 부르는 자리) - 페이지 자체가 동일값 조기 반환을 먼저 본다
+	// (spec §3.1.6~7). core 는 필터의 "현재 선택값" 을 소유하지 않으므로 SourceFilter() 는
+	// 페이지 상태의 순수 getter 다.
+	void SetSortMode(pynote::core::domain::E_CARD_LIST_SORT_MODE _eMode);
+	void SetSourceFilter(std::optional<pynote::core::domain::E_CARD_SOURCE> _eSource);
+	std::optional<pynote::core::domain::E_CARD_SOURCE> SourceFilter() const noexcept;
 	bool IsHistoryVisible() const noexcept;
 	bool HasSession() const noexcept;
 	bool HasDirtySession() const;
